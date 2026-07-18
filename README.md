@@ -96,7 +96,7 @@ $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native swit
 
 ## Community
 
-[Discussions are open](https://github.com/HughScott2002/aurora/discussions); questions, ideas and show-and-tell all welcome. PRs too, especially new frontends: the [`protocol`](protocol/) crate is the seam (JSON over a unix socket), so a TUI, KDE or web client needs zero daemon changes. House rules for contributions, human or agent, live in [AGENTS.md](AGENTS.md).
+[Discussions are open](https://github.com/HughScott2002/aurora/discussions); questions, ideas and show-and-tell all welcome. PRs too, especially new frontends: the [`protocol`](protocol/) crate is the seam (JSON over a unix socket), so a TUI, KDE or web client needs zero daemon changes. Start with [CONTRIBUTING.md](CONTRIBUTING.md); the code rules live in [docs/style-guide.md](docs/style-guide.md).
 
 ## Credits
 
