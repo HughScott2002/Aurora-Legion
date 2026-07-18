@@ -78,7 +78,7 @@ imports = [ aurora.nixosModules.default ];
 hardware.aurora.enable = true;
 ```
 
-Or just try it: `nix run github:HughScott2002/aurora` (GUI); run `nix run github:HughScott2002/aurora#daemon` first if the service isn't running.
+Or just try it: `nix run github:HughScott2002/aurora` (GUI); run `nix run github:HughScott2002/aurora#daemon` first if the service isn't running. Building from a clone: [docs/quick-start.md](docs/quick-start.md).
 
 ## CLI
 

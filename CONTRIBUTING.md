@@ -13,13 +13,13 @@ libadwaita in the GUI.
 
 ## Workflow
 
+- Clone-to-running-build steps, devshell flags and the udev rule are in
+  [docs/quick-start.md](docs/quick-start.md).
 - Enable the local build gate once per clone:
   `git config core.hooksPath hooks`. It runs `nix build` before every
   push; there is no CI, the gate is the check.
-- Develop inside `nix develop`. Local cargo builds need
-  `CXXFLAGS="-include cstdint"` and `--features aurora/scrap-pkg-config`.
-- Verify against the real daemon: `cargo build -p aurora && ./target/debug/aurora daemon`,
-  then drive it with `aurora status` / `aurora set` or the GUI.
+- Verify changes against the real daemon, not just the compiler: run it,
+  drive it with `aurora status` / `aurora set` or the GUI.
 
 ## Commits and PRs
 
