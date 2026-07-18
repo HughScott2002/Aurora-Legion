@@ -22,7 +22,7 @@ use tray_icon::menu::MenuEvent;
 use crate::{
     cli::OutputType,
     enums::Effects,
-    manager::{self, custom_effect::CustomEffect, profile::Profile, show_effect_ui, EffectManager, ManagerCreationError},
+    manager::{self, custom_effect::CustomEffect, profile::Profile, EffectManager, ManagerCreationError},
     persist::Settings,
     tray::{QUIT_ID, SHOW_ID},
     DENY_HIDING,
@@ -30,6 +30,8 @@ use crate::{
 
 use self::{menu_bar::MenuBarState, saved_items::SavedItems, style::Theme};
 
+mod default_ui;
+mod effect_ui;
 mod menu_bar;
 mod modals;
 mod saved_items;
@@ -383,7 +385,7 @@ impl App {
 
     fn show_effect_ui(&mut self, ui: &mut eframe::egui::Ui) {
         ui.add_enabled_ui(self.loaded_effect.is_none(), |ui| {
-            show_effect_ui(ui, &mut self.current_profile, &mut self.state_changed, &self.theme);
+            effect_ui::show_effect_ui(ui, &mut self.current_profile, &mut self.state_changed, &self.theme);
         });
     }
 

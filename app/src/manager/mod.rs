@@ -21,8 +21,6 @@ pub mod custom_effect;
 mod effects;
 pub mod profile;
 
-pub use effects::show_effect_ui;
-
 #[derive(Debug, Error, PartialEq)]
 #[error("Could not create keyboard manager")]
 pub enum ManagerCreationError {

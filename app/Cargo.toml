@@ -12,6 +12,9 @@ license = "GPL-3.0"
 # Main driver
 legion-rgb-driver = { path = "../driver" }
 
+# Shared domain types (effects, profiles, custom effects, storage)
+legion-kb-protocol = { path = "../protocol" }
+
 # Cli
 clap = { version = "4.5.37", features = ["color", "cargo", "derive"] }
 

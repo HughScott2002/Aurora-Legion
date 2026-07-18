@@ -11,7 +11,7 @@ pub struct LoadFileError;
 #[error("Failed to save file")]
 pub struct SaveFileError;
 
-pub(super) trait StorageTrait<'a>
+pub trait StorageTrait<'a>
 where
     Self: DeserializeOwned + Serialize + Sized,
     for<'de> Self: Deserialize<'de> + 'a,
