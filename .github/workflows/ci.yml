@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  nix-build:
+    name: nix build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v16
+
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      # Builds aurora + aurora-gui, runs workspace tests (doCheck), and
+      # packages the systemd unit, desktop entry and icon.
+      - name: Build and test
+        run: nix build --print-build-logs
+
+      - name: Flake checks
+        run: nix flake check
