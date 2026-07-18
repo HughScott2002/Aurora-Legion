@@ -15,3 +15,6 @@ result
 things.md
 *.json
 .history
+
+# Agent tooling state
+.a5c

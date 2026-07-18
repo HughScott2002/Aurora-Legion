@@ -1,5 +1,5 @@
 {
-  description = "Cross platform software to control the RGB/lighting of the 4 zone keyboard included in the 2020, 2021, 2022, 2023 and 2024 lineup of the Lenovo Legion laptops";
+  description = "Daemon + GTK4 app to control the RGB keyboard of Lenovo Legion laptops";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -30,6 +30,92 @@
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = import systems;
+
+      flake = {
+        # Per-user service: installs the package and runs `legion-kb daemon`
+        # as a systemd user service bound to the graphical session.
+        homeModules.default =
+          {
+            config,
+            lib,
+            pkgs,
+            ...
+          }:
+          let
+            cfg = config.services.legion-kb-rgb;
+          in
+          {
+            options.services.legion-kb-rgb = {
+              enable = lib.mkEnableOption "the Legion keyboard RGB daemon";
+
+              package = lib.mkOption {
+                type = lib.types.package;
+                default = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+                description = "The legion-kb package to run.";
+              };
+            };
+
+            config = lib.mkIf cfg.enable {
+              home.packages = [ cfg.package ];
+
+              systemd.user.services.legion-kb = {
+                Unit = {
+                  Description = "Legion keyboard RGB daemon";
+                  # The ambient, ripple and hotkey features need the session
+                  # environment (WAYLAND_DISPLAY/DISPLAY), hence
+                  # graphical-session.target instead of default.target.
+                  After = [ "graphical-session.target" ];
+                  PartOf = [ "graphical-session.target" ];
+                };
+                Service = {
+                  ExecStart = "${cfg.package}/bin/legion-kb daemon";
+                  Restart = "on-failure";
+                  RestartSec = 2;
+                };
+                Install = {
+                  WantedBy = [ "graphical-session.target" ];
+                };
+              };
+            };
+          };
+
+        # System-level piece: the udev rule that lets the logged-in user
+        # open the keyboard's hidraw device without root.
+        nixosModules.default =
+          { config, lib, ... }:
+          let
+            cfg = config.hardware.legion-kb-rgb;
+
+            # (vendor, product) pairs of every supported keyboard controller,
+            # mirroring KNOWN_DEVICE_INFOS in driver/src/lib.rs.
+            productIds = [
+              "c955" # 2020
+              "c963" # 2021 Ideapad
+              "c965" # 2021
+              "c973" # 2022 Ideapad
+              "c975" # 2022
+              "c983" # 2023 LOQ
+              "c984" # 2023
+              "c985" # 2023 Pro
+              "c993" # 2024 LOQ
+              "c994" # 2024
+              "c995" # 2024 Pro
+            ];
+
+            ruleForProduct = productId: ''
+              KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="${productId}", TAG+="uaccess"
+            '';
+          in
+          {
+            options.hardware.legion-kb-rgb = {
+              enable = lib.mkEnableOption "udev rules granting seat users access to the Legion RGB keyboard";
+            };
+
+            config = lib.mkIf cfg.enable {
+              services.udev.extraRules = lib.concatStrings (map ruleForProduct productIds);
+            };
+          };
+      };
 
       perSystem =
         {
@@ -63,11 +149,11 @@
             expat
             openssl
 
-            # Tray icon
+            # GTK4 GUI
             pango
-            gtk3
             gdk-pixbuf
-            xdotool
+            gtk4
+            libadwaita
           ];
 
           # Libraries needed at runtime
@@ -78,12 +164,8 @@
               libxcb
               freetype
               libxrandr
-              libGL
               wayland
               libxkbcommon
-
-              # Tray icon
-              libayatana-appindicator
             ]
             ++ sharedDeps;
 
@@ -95,8 +177,9 @@
           workspaceSrc = ./.;
           workspaceSrcString = builtins.toString workspaceSrc;
 
-          resFileFilter = path: _type: lib.hasPrefix "${workspaceSrcString}/app/res/" path;
-          workspaceFilter = path: type: (resFileFilter path type) || (craneLib.filterCargoSources path type);
+          dataFileFilter =
+            path: _type: (lib.hasPrefix "${workspaceSrcString}/gui/data/" path) || (lib.hasPrefix "${workspaceSrcString}/systemd/" path);
+          workspaceFilter = path: type: (dataFileFilter path type) || (craneLib.filterCargoSources path type);
 
           src = lib.cleanSourceWith {
             src = workspaceSrc;
@@ -117,6 +200,7 @@
             pkg-config
             cmake
             clang
+            wrapGAppsHook4
           ];
 
           # Forgo using VCPKG hacks on local builds because pain
@@ -124,7 +208,7 @@
 
           stdenv = p: (p.stdenvAdapters.useMoldLinker p.stdenv);
 
-          inherit (craneLib.crateNameFromCargoToml { cargoToml = ./app/Cargo.toml; }) pname version;
+          inherit (craneLib.crateNameFromCargoToml { cargoToml = ./daemon/Cargo.toml; }) pname version;
 
           # Vendor dependencies to fix webm-sys compile issue
           # https://github.com/NixOS/nixpkgs/pull/475893
@@ -167,17 +251,32 @@
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-          # The main application derivation
-          legion-kb-rgb = craneLib.buildPackage (
+          # Daemon + CLI (`legion-kb`) and GTK4 GUI (`legion-kb-gui`)
+          legion-kb = craneLib.buildPackage (
             commonArgs
             // {
               meta.mainProgram = pname;
               inherit cargoArtifacts;
 
-              doCheck = false;
+              doCheck = true;
 
+              postInstall = ''
+                install -Dm444 gui/data/com.github.hugh.LegionKbRgb.desktop -t $out/share/applications
+                install -Dm444 gui/data/icons/hicolor/scalable/apps/com.github.hugh.LegionKbRgb.svg -t $out/share/icons/hicolor/scalable/apps
+
+                install -Dm444 systemd/legion-kb.service -t $out/lib/systemd/user
+                substituteInPlace $out/lib/systemd/user/legion-kb.service \
+                  --replace-fail "ExecStart=legion-kb daemon" "ExecStart=$out/bin/legion-kb daemon"
+              '';
+
+              # wrapGAppsHook4 turns bin/* into wrapper scripts; patch the
+              # actual ELF files wherever they ended up.
               postFixup = ''
-                patchelf --add-rpath "${lib.makeLibraryPath runtimeDeps}" "$out/bin/${pname}"
+                for exe in $out/bin/* $out/bin/.*-wrapped; do
+                  if [ -f "$exe" ] && isELF "$exe"; then
+                    patchelf --add-rpath "${lib.makeLibraryPath runtimeDeps}" "$exe"
+                  fi
+                done
               '';
             }
           );
@@ -188,9 +287,10 @@
             overlays = [ (import rust-overlay) ];
           };
 
-          packages.default = legion-kb-rgb;
+          packages.default = legion-kb;
 
-          apps.default.program = "${legion-kb-rgb}/bin/${pname}";
+          apps.default.program = "${legion-kb}/bin/legion-kb-gui";
+          apps.daemon.program = "${legion-kb}/bin/${pname}";
 
           devShells.default =
             let
