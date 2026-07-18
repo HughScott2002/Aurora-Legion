@@ -22,16 +22,32 @@ graph LR
     SD["systemd --user"] -. "starts at login" .-> D
 ```
 
-|                   | upstream                             | this fork                                          |
-| ----------------- | ------------------------------------ | -------------------------------------------------- |
-| Lighting lifetime | dies with the window                 | daemon survives login to logout                    |
-| Startup           | launch it yourself                   | systemd user service, profile restored at login    |
-| UI                | egui, fixed 500×460 window           | native GTK4/libadwaita, GNOME HIG                  |
-| CLI               | one-shot, hardware effects only      | talks to the daemon, so effects persist     |
-| Settings          | `./settings.json` in the working dir | XDG config, atomic writes, migrates old files      |
-| Keyboard unplug   | panics an effect thread              | detected, reacquired with backoff, shown in the UI |
+|                   | upstream                             | this fork                                            |
+| ----------------- | ------------------------------------ | ---------------------------------------------------- |
+| Lighting lifetime | dies with the window                 | daemon survives login to logout                      |
+| Startup           | launch it yourself                   | systemd user service, profile restored at login      |
+| UI                | egui, fixed 500×460 window           | native GTK4/libadwaita, GNOME HIG                    |
+| CLI               | one-shot, hardware effects only      | talks to the daemon, so effects persist              |
+| Scripting         | none                                 | JSON IPC socket, CLI, systemd + home-manager modules |
+| Settings          | `./settings.json` in the working dir | XDG config, atomic writes, migrates old files        |
+| Keyboard unplug   | panics an effect thread              | detected, reacquired with backoff, shown in the UI   |
 
 The daemon owns everything stateful behind one command loop (one thread mutates state, everything else sends messages), channels and queues are bounded, and no driver call can panic the engine. Written [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
+
+## Measured, not claimed
+
+Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: upstream's GUI window, aurora's daemon.
+
+| Metric                  | upstream 0.20.8          | aurora                     | verdict                                                |
+| ----------------------- | ------------------------ | -------------------------- | ------------------------------------------------------ |
+| Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | 8× smaller                                             |
+| Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | 8× smaller                                             |
+| Resident CPU, idle      | 0.10%                    | 0.17%                      | **worse**: the daemon still polls; fix tracked in [#1] |
+| Resident CPU, Swipe     | 0.52%                    | 0.55–0.97%                 | comparable, more variance                              |
+| Binaries on disk        | 26.6 MB                  | 8.4 MB daemon + 2.5 MB GUI | 2.4× smaller combined                                  |
+| GUI while open          | is the resident 82.6 MiB | 61 MiB, exits on close     | lighter, and transient by design                       |
+
+[#1]: https://github.com/HughScott2002/aurora/issues/1
 
 ## Install (NixOS + home-manager)
 
@@ -63,6 +79,10 @@ profile applied        # keeps running after the CLI exits; it lives in the daem
 
 $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native switching
 ```
+
+## Community
+
+[Discussions are open](https://github.com/HughScott2002/aurora/discussions); questions, ideas and show-and-tell all welcome. PRs too, especially new frontends: the [`protocol`](protocol/) crate is the seam (JSON over a unix socket), so a TUI, KDE or web client needs zero daemon changes. House rules for contributions, human or agent, live in [AGENTS.md](AGENTS.md).
 
 ## Credits
 
