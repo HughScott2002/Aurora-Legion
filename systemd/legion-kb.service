@@ -1,0 +1,17 @@
+[Unit]
+Description=Legion keyboard RGB daemon
+# graphical-session.target (not default.target) on purpose: the ambient,
+# ripple and hotkey features need WAYLAND_DISPLAY/DISPLAY from the session
+# environment, which the desktop imports into the user manager at login.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+# When installed by the home-manager module, ExecStart is substituted with
+# an absolute nix store path.
+ExecStart=legion-kb daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

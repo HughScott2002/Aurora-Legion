@@ -1,0 +1,173 @@
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
+use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
+use legion_kb_protocol::profile::Profile;
+
+use crate::engine::{effects::zones::KEY_ZONES, Inner};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RippleMove {
+    Center,
+    Left,
+    Right,
+    Off,
+}
+
+pub fn play(manager: &mut Inner, p: &Profile) {
+    let stop_signals = manager.stop_signals.clone();
+
+    let kill_thread = Arc::new(AtomicBool::new(false));
+    let exit_thread = kill_thread.clone();
+
+    enum Event {
+        KeyPress(Keycode),
+        KeyRelease(Keycode),
+    }
+
+    // Bounded: key events beyond this while the effect thread is busy are
+    // dropped, which for a visual ripple is harmless.
+    const KEY_EVENT_QUEUE_CAPACITY: usize = 64;
+    let (tx, rx) = crossbeam_channel::bounded::<Event>(KEY_EVENT_QUEUE_CAPACITY);
+
+    thread::spawn(move || {
+        // Do this in order to avoid having to store the event handler struct somewhere,
+        // since it saves no data and serves only as a fancy function proxy for interacting with the real event loop
+        // This keeps the effect self contained, and other effects should probably use the same pattern
+        let event_handler = DeviceEventsHandler::new(Duration::from_millis(10)).unwrap_or(DeviceEventsHandler {});
+
+        let tx_clone = tx.clone();
+
+        let press_guard = event_handler.on_key_down(move |key| {
+            stop_signals.keyboard_stop_signal.store(true, Ordering::SeqCst);
+
+            let _ = tx_clone.try_send(Event::KeyPress(*key));
+        });
+
+        let release_guard = event_handler.on_key_up(move |key| {
+            let _ = tx.try_send(Event::KeyRelease(*key));
+        });
+
+        loop {
+            if exit_thread.load(Ordering::SeqCst) {
+                drop(press_guard);
+                drop(release_guard);
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(5));
+        }
+    });
+
+    let mut zone_pressed: [HashSet<Keycode>; 4] = [HashSet::new(), HashSet::new(), HashSet::new(), HashSet::new()];
+    let mut zone_state: [RippleMove; 4] = [RippleMove::Off, RippleMove::Off, RippleMove::Off, RippleMove::Off];
+
+    let mut last_step_time = Instant::now();
+
+    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+        match rx.try_recv() {
+            Ok(event) => match event {
+                Event::KeyPress(key) => {
+                    for (i, zone) in KEY_ZONES.iter().enumerate() {
+                        if zone.contains(&key) {
+                            zone_pressed[i].insert(key);
+                        }
+                    }
+
+                    manager.stop_signals.keyboard_stop_signal.store(false, Ordering::SeqCst);
+                }
+                Event::KeyRelease(key) => {
+                    for (i, zone) in KEY_ZONES.iter().enumerate() {
+                        if zone.contains(&key) {
+                            zone_pressed[i].remove(&key);
+                        }
+                    }
+                }
+            },
+            Err(err) => {
+                if err == crossbeam_channel::TryRecvError::Disconnected {
+                    break;
+                }
+            }
+        }
+
+        zone_state = advance_zone_state(zone_state, &mut last_step_time, &p.speed);
+
+        for (i, pressed) in zone_pressed.iter().enumerate() {
+            if !pressed.is_empty() {
+                zone_state[i] = RippleMove::Center;
+            }
+        }
+
+        let rgb_array = p.rgb_array();
+        let mut final_arr: [u8; 12] = [0; 12];
+
+        for (i, ripple_move) in zone_state.iter().enumerate() {
+            if ripple_move != &RippleMove::Off {
+                final_arr[(i * 3)..((i * 3) + 3)].copy_from_slice(&rgb_array[(i * 3)..((i * 3) + 3)]);
+            }
+        }
+
+        if !manager.write_transition(&final_arr, 20, 0) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    kill_thread.store(true, Ordering::SeqCst);
+}
+
+fn advance_zone_state(zone_state: [RippleMove; 4], last_step_time: &mut Instant, speed: &u8) -> [RippleMove; 4] {
+    let now = Instant::now();
+
+    if now - *last_step_time > Duration::from_millis((200 / *speed) as u64) {
+        let mut new_state: [RippleMove; 4] = [RippleMove::Off, RippleMove::Off, RippleMove::Off, RippleMove::Off];
+
+        *last_step_time = now;
+
+        // Process moves first, then add centers
+        for (i, zone_move) in zone_state.iter().enumerate() {
+            match zone_move {
+                RippleMove::Left => {
+                    if i != 0 {
+                        if let Some(left) = new_state.get_mut(i - 1) {
+                            *left = RippleMove::Left;
+                        }
+                    }
+                }
+
+                RippleMove::Right => {
+                    if let Some(right) = new_state.get_mut(i + 1) {
+                        *right = RippleMove::Right;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for (i, ripple_move) in zone_state.iter().enumerate() {
+            if matches!(ripple_move, RippleMove::Center) {
+                if i != 0 {
+                    if let Some(left) = new_state.get_mut(i - 1) {
+                        *left = RippleMove::Left;
+                    }
+                }
+
+                if let Some(right) = new_state.get_mut(i + 1) {
+                    *right = RippleMove::Right;
+                }
+            }
+        }
+
+        new_state
+    } else {
+        zone_state
+    }
+}
