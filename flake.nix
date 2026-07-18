@@ -1,5 +1,5 @@
 {
-  description = "Aurora — daemon + native GTK4 app for the RGB keyboard of Lenovo Legion laptops";
+  description = "Aurora: daemon + native GTK4 app for the RGB keyboard of Lenovo Legion laptops";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

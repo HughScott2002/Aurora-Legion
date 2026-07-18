@@ -167,7 +167,7 @@ fn run_status() -> ExitCode {
     }
 
     let profile_name = state.current.name.unwrap_or_else(|| "(unsaved)".to_string());
-    println!("profile:  {profile_name} — {} effect", state.current.effect);
+    println!("profile:  {profile_name} ({} effect)", state.current.effect);
     if let Some(name) = state.custom_effect_playing {
         println!("playing:  custom effect '{name}'");
     }

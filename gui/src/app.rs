@@ -386,7 +386,7 @@ impl SimpleComponent for App {
                     return; // Echo from update_view.
                 }
                 if !self.autostart_available {
-                    self.queue_toast("No systemd unit found — install the aurora.service unit first");
+                    self.queue_toast("No systemd unit found. Install the aurora.service unit first");
                     return;
                 }
                 if self.autostart_managed {
@@ -437,7 +437,7 @@ impl SimpleComponent for App {
         // --- Keyboard status banner ---------------------------------------
         match &state.keyboard {
             KeyboardStatus::PermissionDenied { .. } => {
-                widgets.permission_banner.set_title("Keyboard access denied — install the udev rule, then replug or reboot");
+                widgets.permission_banner.set_title("Keyboard access denied. Install the udev rule, then replug or reboot");
                 widgets.permission_banner.set_revealed(true);
             }
             KeyboardStatus::Searching => {

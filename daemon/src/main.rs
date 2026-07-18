@@ -17,7 +17,7 @@ use aurora_protocol::ipc::socket_path;
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 
 #[derive(Parser)]
-#[command(author, version, about = "Aurora — Legion keyboard lighting daemon and control CLI", name = "aurora")]
+#[command(author, version, about = "Aurora: Legion keyboard lighting daemon and control CLI", name = "aurora")]
 struct Cli {
     #[command(subcommand)]
     command: CliCommand,

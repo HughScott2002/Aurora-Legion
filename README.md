@@ -12,7 +12,7 @@ A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-
 
 ## Why a rearchitecture
 
-The original ships everything — driver, effect threads, tray icon, UI — in one egui process. Close the window and your lighting dies with it; on Wayland the window can't even hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). This fork splits the system at its natural seam:
+The original ships everything (driver, effect threads, tray icon, UI) in one egui process. Close the window and your lighting dies with it; on Wayland the window can't even hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). This fork splits the system at its natural seam:
 
 ```mermaid
 graph LR
@@ -27,11 +27,11 @@ graph LR
 | Lighting lifetime | dies with the window                 | daemon survives login to logout                    |
 | Startup           | launch it yourself                   | systemd user service, profile restored at login    |
 | UI                | egui, fixed 500×460 window           | native GTK4/libadwaita, GNOME HIG                  |
-| CLI               | one-shot, hardware effects only      | talks to the daemon — software effects persist     |
+| CLI               | one-shot, hardware effects only      | talks to the daemon, so effects persist     |
 | Settings          | `./settings.json` in the working dir | XDG config, atomic writes, migrates old files      |
 | Keyboard unplug   | panics an effect thread              | detected, reacquired with backoff, shown in the UI |
 
-The daemon owns everything stateful behind one command loop (one thread mutates state, everything else sends messages), channels and queues are bounded, and no driver call can panic the engine — written [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
+The daemon owns everything stateful behind one command loop (one thread mutates state, everything else sends messages), channels and queues are bounded, and no driver call can panic the engine. Written [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
 
 ## Install (NixOS + home-manager)
 
@@ -48,7 +48,7 @@ imports = [ aurora.nixosModules.default ];
 hardware.aurora.enable = true;
 ```
 
-Or just try it: `nix run github:HughScott2002/aurora` (GUI) — `nix run github:HughScott2002/aurora#daemon` first if the service isn't running.
+Or just try it: `nix run github:HughScott2002/aurora` (GUI); run `nix run github:HughScott2002/aurora#daemon` first if the service isn't running.
 
 ## CLI
 
@@ -56,15 +56,15 @@ Or just try it: `nix run github:HughScott2002/aurora` (GUI) — `nix run github:
 $ aurora status
 daemon:   running (v0.21.0)
 keyboard: connected
-profile:  gaming — Static effect
+profile:  gaming (Static effect)
 
 $ aurora set -e Swipe -c 255,0,0,0,255,0,0,0,255,255,0,255 -s 3
-profile applied        # keeps running after the CLI exits — it lives in the daemon
+profile applied        # keeps running after the CLI exits; it lives in the daemon
 
 $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native switching
 ```
 
 ## Credits
 
-- [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB) — the original project: the USB HID driver, the effect implementations and years of device support live on here, GPL-3.0 like this fork.
-- Supported models (2020–2024 Legion / IdeaPad / LOQ) are unchanged from upstream — see [`driver/src/lib.rs`](driver/src/lib.rs).
+- [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB): the original project. The USB HID driver, the effect implementations and years of device support live on here, GPL-3.0 like this fork.
+- Supported models (2020–2024 Legion / IdeaPad / LOQ) are unchanged from upstream; see [`driver/src/lib.rs`](driver/src/lib.rs).
