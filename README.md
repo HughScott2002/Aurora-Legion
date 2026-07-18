@@ -58,7 +58,7 @@ Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s w
 | ----------------------- | ------------------------ | -------------------------- | ------------------------------------------------------ |
 | Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | 8× smaller                                             |
 | Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | 8× smaller                                             |
-| Resident CPU, idle      | 0.10%                    | 0.17%                      | **worse**: the daemon still polls; fix tracked in [#1] |
+| Resident CPU, idle      | 0.10%                    | 0.04%                      | 2.5× lower (was 0.17% until the polling fix, [#1])     |
 | Resident CPU, Swipe     | 0.52%                    | 0.55–0.97%                 | comparable, more variance                              |
 | Binaries on disk        | 26.6 MB                  | 8.4 MB daemon + 2.5 MB GUI | 2.4× smaller combined                                  |
 | GUI while open          | is the resident 82.6 MiB | 61 MiB, exits on close     | lighter, and transient by design                       |

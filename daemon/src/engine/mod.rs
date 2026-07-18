@@ -32,9 +32,6 @@ mod effects;
 /// blocks briefly if the engine is busy stopping the current effect.
 const MESSAGE_QUEUE_CAPACITY: usize = 4;
 
-/// Sleep between queue polls while no effect is running.
-const IDLE_POLL_MS: u64 = 20;
-
 /// The speed range software effects accept (hardware effects use the
 /// driver's `SPEED_RANGE`).
 pub const SOFTWARE_SPEED_RANGE: std::ops::RangeInclusive<u8> = 1..=10;
@@ -77,26 +74,37 @@ impl EffectManager {
         };
 
         let inner_handle = thread::spawn(move || loop {
-            // Drain the queue; only the newest message matters because each
-            // message fully replaces the keyboard state.
-            let mut newest: Option<Message> = None;
+            // Block until a message arrives: while a hardware effect is
+            // showing, this thread is fully asleep. (Issue #1: the old
+            // 20 ms poll here woke fifty times a second for nothing.)
+            let first = match inner.rx.recv() {
+                Ok(message) => message,
+                Err(_) => break, // Every sender is gone; nothing left to run.
+            };
+
+            // Coalesce the backlog: each message fully replaces the keyboard
+            // state, so only the newest one needs to run. Exit must never be
+            // coalesced away.
+            let mut newest = first;
+            let mut exit_seen = matches!(newest, Message::Exit);
             for message in inner.rx.try_iter() {
-                newest = Some(message);
+                if matches!(message, Message::Exit) {
+                    exit_seen = true;
+                }
+                newest = message;
+            }
+            if exit_seen {
+                break;
             }
 
             match newest {
-                Some(Message::Profile { profile }) => {
+                Message::Profile { profile } => {
                     inner.set_profile(profile);
                 }
-                Some(Message::CustomEffect { effect }) => {
+                Message::CustomEffect { effect } => {
                     inner.play_custom_effect(&effect);
                 }
-                Some(Message::Exit) => {
-                    break;
-                }
-                None => {
-                    thread::sleep(Duration::from_millis(IDLE_POLL_MS));
-                }
+                Message::Exit => break,
             }
         });
 

@@ -23,9 +23,14 @@ use crate::{
     settings::Settings,
 };
 
-/// How long the core waits for a command before running its housekeeping
-/// tick (keyboard reacquisition, debounced settings save, device errors).
-const TICK_MS: u64 = 250;
+/// Tick used while something is pending: keyboard acquisition in progress
+/// or a debounced settings save waiting to happen.
+const TICK_BUSY_MS: u64 = 250;
+
+/// Tick used when the keyboard is healthy and nothing is pending. The only
+/// work on this tick is checking the device-error flag, so it can be slow;
+/// signals and IPC arrive as commands and wake the loop immediately.
+const TICK_IDLE_MS: u64 = 2000;
 
 /// The live profile is saved this long after the last change, so a GUI
 /// slider drag does not write the file on every wiggle.
@@ -43,6 +48,9 @@ pub enum Command {
         out_tx: Sender<Outbound>,
     },
     CycleProfile,
+    /// SIGTERM/SIGINT arrived; sent by the signal listener thread so the
+    /// core wakes immediately instead of on its next tick.
+    ShutdownSignal,
 }
 
 /// A line queued for one client connection; the connection's writer thread
@@ -100,7 +108,7 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         core.check_device_error();
         core.try_acquire_keyboard_if_due();
 
-        match command_rx.recv_timeout(Duration::from_millis(TICK_MS)) {
+        match command_rx.recv_timeout(core.next_tick_timeout()) {
             Ok(command) => core.handle_command(command),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
@@ -189,7 +197,22 @@ impl Core {
                     eprintln!("core: hotkey profile cycle failed: {message}");
                 }
             }
+            Command::ShutdownSignal => {
+                self.shutdown_requested = true;
+            }
         }
+    }
+
+    /// Slow tick when the keyboard is healthy and nothing is pending; fast
+    /// tick while acquiring the keyboard or holding an unsaved change.
+    fn next_tick_timeout(&self) -> Duration {
+        if self.settings_dirty {
+            return Duration::from_millis(TICK_BUSY_MS);
+        }
+        if self.engine.is_none() {
+            return Duration::from_millis(TICK_BUSY_MS);
+        }
+        Duration::from_millis(TICK_IDLE_MS)
     }
 
     fn handle_request(&mut self, request: Request, out_tx: &Sender<Outbound>) -> Response {

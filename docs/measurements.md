@@ -32,15 +32,30 @@ were built by the same nix pipeline (release profile, same toolchain):
 Binary sizes from the nix outputs (`du -b`): upstream single binary
 26.6 MB; aurora daemon 8.4 MB plus GUI 2.5 MB.
 
+## Post-fix: idle CPU (issue #1)
+
+The first measurement round showed aurora idling at 0.17% versus
+upstream's 0.10% because the engine idle loop woke every 20 ms, the core
+ticked every 250 ms and the hotkey polled every 50 ms. After the fix
+(engine blocks on its channel, core ticks at 2 s when healthy with a
+signal listener for instant shutdown, hotkey at 100 ms), the same
+two-pass measurement reads:
+
+| Scenario | PSS pass 1 | PSS pass 2 | CPU pass 1 | CPU pass 2 |
+| --- | --- | --- | --- | --- |
+| aurora daemon, Static, post-fix | 10.9 MiB | 10.9 MiB | 0.03% | 0.05% |
+
+SIGTERM-to-exit latency measured at 160 ms with the slow tick active.
+
 ## Reading the numbers honestly
 
 - The resident process (what runs whenever your lights are on) shrinks
   from 82.6 MiB to about 10 MiB, because the resident part no longer
   carries a GUI toolkit, a renderer or a tray stack.
-- Idle CPU is *worse* in aurora: about 0.17% versus upstream's 0.10%.
-  The daemon's engine idle loop, core tick and hotkey poll all wake on
-  timers. Replacing the polls with blocking waits is tracked in the
-  issue linked from the README.
+- Idle CPU was *worse* in the first round: 0.17% versus upstream's
+  0.10%, from timer wakeups. The polling fix above brings it to 0.04%,
+  now below upstream. The remaining cost is the 100 ms hotkey poll,
+  which device_query cannot avoid.
 - Swipe CPU is comparable with higher variance (0.55 to 0.97% versus a
   steady 0.52%); the work (HID transitions) is the same code inherited
   from upstream.

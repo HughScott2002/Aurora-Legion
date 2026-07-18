@@ -13,7 +13,7 @@ use device_query::{DeviceQuery, DeviceState, Keycode};
 
 use crate::core::Command;
 
-const POLL_INTERVAL_MS: u64 = 50;
+const POLL_INTERVAL_MS: u64 = 100;
 
 pub fn spawn(command_tx: Sender<Command>) {
     thread::spawn(move || {

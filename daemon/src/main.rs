@@ -83,6 +83,7 @@ fn run_daemon() {
 
     let (command_tx, command_rx) = crossbeam_channel::bounded(COMMAND_QUEUE_CAPACITY);
 
+    spawn_signal_listener(command_tx.clone());
     hotkey::spawn(command_tx.clone());
 
     // Accept loop on its own thread; it lives for the whole process, so the
@@ -102,6 +103,30 @@ fn run_daemon() {
     }
 
     eprintln!("aurora: daemon stopped");
+}
+
+/// Forward SIGTERM/SIGINT into the core's command queue so a blocked
+/// `recv_timeout` wakes immediately; the atomic flag from
+/// `register_shutdown_signals` stays as the backstop.
+fn spawn_signal_listener(command_tx: crossbeam_channel::Sender<core::Command>) {
+    let signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT]);
+
+    let mut signals = match signals {
+        Ok(signals) => signals,
+        Err(error) => {
+            eprintln!("aurora: could not start signal listener: {error}");
+            return;
+        }
+    };
+
+    std::thread::spawn(move || {
+        for _signal in signals.forever() {
+            let send_result = command_tx.send(core::Command::ShutdownSignal);
+            if send_result.is_err() {
+                return; // Core is gone; the process is exiting anyway.
+            }
+        }
+    });
 }
 
 fn register_shutdown_signals(shutdown_flag: &Arc<AtomicBool>) {
