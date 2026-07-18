@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-push gate: the repo must `nix build` before it leaves this machine.
+# Replaces CI. Enable once per clone with:
+#   git config core.hooksPath hooks
+# Bypass for emergencies:
+#   SKIP_NIX_BUILD=1 git push
+
+if [ "${SKIP_NIX_BUILD:-0}" = "1" ]; then
+    echo "pre-push: SKIP_NIX_BUILD=1 set, skipping nix build"
+    exit 0
+fi
+
+echo "pre-push: running nix build (set SKIP_NIX_BUILD=1 to bypass)"
+exec nix build
