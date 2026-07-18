@@ -6,6 +6,22 @@
 
 A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB), whose reverse-engineered driver and effect engine make this project possible.
 
+<p>
+  <a href="#install-nixos--home-manager"><img src="https://img.shields.io/badge/-Install-ff2740?style=for-the-badge" alt="Install" /></a>&nbsp;
+  <a href="#cli"><img src="https://img.shields.io/badge/-CLI-37f558?style=for-the-badge" alt="CLI" /></a>&nbsp;
+  <a href="#measured-not-claimed"><img src="https://img.shields.io/badge/-Measurements-3584e4?style=for-the-badge" alt="Measurements" /></a>&nbsp;
+  <a href="https://github.com/HughScott2002/aurora/discussions"><img src="https://img.shields.io/badge/-Discussions-e01b96?style=for-the-badge" alt="Discussions" /></a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Rust-1.94-B7410E?logo=rust&logoColor=white" alt="Rust 1.94" />
+  <img src="https://img.shields.io/badge/GTK4-libadwaita-4A86CF?logo=gnome&logoColor=white" alt="GTK4 + libadwaita" />
+  <img src="https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos&logoColor=white" alt="Nix flake" />
+  <img src="https://img.shields.io/badge/systemd-user_service-2d2d2d" alt="systemd user service" />
+  <img src="https://img.shields.io/badge/resident_memory-10_MiB-37f558" alt="Resident memory 10 MiB" />
+  <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0" />
+</p>
+
 <img src="docs/screenshot.png" alt="aurora GTK4 interface" width="560"/>
 
 </div>
