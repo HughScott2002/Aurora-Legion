@@ -38,7 +38,7 @@ graph LR
     SD["systemd --user"] -. "starts at login" .-> D
 ```
 
-|                   | upstream                                | this fork                                               |
+|                   | L5P-Keyboard-RGB                        | Aurora                                               |
 | ----------------- | --------------------------------------- | ------------------------------------------------------- |
 | Lighting lifetime | ❌ dies with the window                 | ✅ daemon survives login to logout                      |
 | Startup           | ❌ launch it yourself                   | ✅ systemd user service, profile restored at login      |
@@ -52,9 +52,9 @@ The daemon owns everything stateful behind one command loop (one thread mutates 
 
 ## Measured, not claimed
 
-Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: upstream's GUI window, aurora's daemon.
+Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: L5P-Keyboard-RGB's GUI window, Aurora's daemon.
 
-| Metric                  | upstream 0.20.8          | aurora                     | verdict                             |
+| Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | verdict                             |
 | ----------------------- | ------------------------ | -------------------------- | ----------------------------------- |
 | Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | ✅ 8× smaller                       |
 | Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | ✅ 8× smaller                       |
@@ -101,4 +101,4 @@ $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native swit
 ## Credits
 
 - [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB): the original project. The USB HID driver, the effect implementations and years of device support live on here, GPL-3.0 like this fork.
-- Supported models (2020–2024 Legion / IdeaPad / LOQ) are unchanged from upstream; see [`driver/src/lib.rs`](driver/src/lib.rs).
+- Supported models (2020–2024 Legion / IdeaPad / LOQ) are unchanged from L5P-Keyboard-RGB; see [`driver/src/lib.rs`](driver/src/lib.rs).
