@@ -1,7 +1,7 @@
 //! The Profiles page: saved profiles as a boxed list, activate to apply,
 //! plus save-current-as and delete.
 
-use legion_kb_protocol::profile::Profile;
+use aurora_protocol::profile::Profile;
 use relm4::{
     adw::{self, prelude::*},
     gtk,

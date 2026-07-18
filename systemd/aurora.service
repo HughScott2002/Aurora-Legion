@@ -1,5 +1,5 @@
 [Unit]
-Description=Legion keyboard RGB daemon
+Description=Aurora keyboard lighting daemon
 # graphical-session.target (not default.target) on purpose: the ambient,
 # ripple and hotkey features need WAYLAND_DISPLAY/DISPLAY from the session
 # environment, which the desktop imports into the user manager at login.
@@ -7,9 +7,9 @@ After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-# When installed by the home-manager module, ExecStart is substituted with
-# an absolute nix store path.
-ExecStart=legion-kb daemon
+# When installed by the home-manager module or the nix package, ExecStart
+# is substituted with an absolute store path.
+ExecStart=aurora daemon
 Restart=on-failure
 RestartSec=2
 

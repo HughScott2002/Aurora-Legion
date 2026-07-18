@@ -1,7 +1,7 @@
 //! The Lighting page: keyboard preview on top, effect + colors + options
 //! below — modeled on GNOME Settings' Appearance panel.
 
-use legion_kb_protocol::effects::Effects;
+use aurora_protocol::effects::Effects;
 use relm4::{
     adw::{self, prelude::*},
     gtk::{self, gdk},

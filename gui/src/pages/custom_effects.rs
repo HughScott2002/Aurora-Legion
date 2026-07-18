@@ -1,6 +1,6 @@
 //! The Custom Effects page: saved custom effects, play/stop, load from file.
 
-use legion_kb_protocol::custom_effect::CustomEffect;
+use aurora_protocol::custom_effect::CustomEffect;
 use relm4::{
     adw::{self, prelude::*},
     gtk,

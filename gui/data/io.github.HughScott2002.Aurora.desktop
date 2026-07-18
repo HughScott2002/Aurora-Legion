@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=Legion RGB
+Name=Aurora
 Comment=Control the RGB keyboard lighting of Lenovo Legion laptops
-Exec=legion-kb-gui
-Icon=com.github.hugh.LegionKbRgb
+Exec=aurora-gui
+Icon=io.github.HughScott2002.Aurora
 Terminal=false
 Type=Application
 Categories=Settings;HardwareSettings;
-Keywords=keyboard;rgb;lighting;legion;
+Keywords=keyboard;rgb;lighting;legion;aurora;
 StartupNotify=true

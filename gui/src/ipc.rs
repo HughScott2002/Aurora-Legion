@@ -13,7 +13,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use legion_kb_protocol::ipc::{socket_path, DaemonState, Event, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES};
+use aurora_protocol::ipc::{socket_path, DaemonState, Event, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES};
 
 /// Delays between reconnect attempts; the last entry repeats. Fast enough
 /// that "start daemon → window comes alive" feels immediate.

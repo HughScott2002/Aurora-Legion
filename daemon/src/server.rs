@@ -10,7 +10,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use legion_kb_protocol::ipc::{ErrorKind, EventEnvelope, RequestEnvelope, Response, ResponseEnvelope, MAX_LINE_BYTES};
+use aurora_protocol::ipc::{ErrorKind, EventEnvelope, RequestEnvelope, Response, ResponseEnvelope, MAX_LINE_BYTES};
 
 use crate::core::{Command, Outbound};
 

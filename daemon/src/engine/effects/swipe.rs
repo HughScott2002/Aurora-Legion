@@ -1,6 +1,6 @@
 use std::{sync::atomic::Ordering, thread, time::Duration};
 
-use legion_kb_protocol::{
+use aurora_protocol::{
     effects::{Direction, SwipeMode},
     profile::Profile,
 };

@@ -1,7 +1,7 @@
 //! Settings persistence. The daemon is the only process that touches the
 //! settings file; GUI and CLI go through IPC.
 //!
-//! Location: `$XDG_CONFIG_HOME/legion-kb-rgb/settings.json`. On first run,
+//! Location: `$XDG_CONFIG_HOME/aurora/settings.json`. On first run,
 //! settings are migrated from the legacy locations the old app used
 //! (`$LEGION_KEYBOARD_CONFIG`, then `./settings.json` in whatever directory
 //! the app happened to start in).
@@ -11,11 +11,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use legion_kb_protocol::{custom_effect::CustomEffect, profile::Profile};
+use aurora_protocol::{custom_effect::CustomEffect, profile::Profile};
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_DIR_NAME: &str = "legion-kb-rgb";
+pub const CONFIG_DIR_NAME: &str = "aurora";
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
+
+/// Config dir used before the project was renamed to aurora; still read
+/// (never written) during migration.
+const PRE_RENAME_CONFIG_DIR_NAME: &str = "legion-kb-rgb";
 
 /// Same serde shape as the old app's `persist::Settings`, so a migrated file
 /// parses without conversion. `effects` keeps its historical name.
@@ -136,9 +140,18 @@ fn preserve_corrupt_file(path: &Path) {
     }
 }
 
-/// The old app read `$LEGION_KEYBOARD_CONFIG` and then `./settings.json`.
-/// Check the same places, in the same order.
+/// Legacy locations, most specific first: the pre-rename XDG dir, the old
+/// app's `$LEGION_KEYBOARD_CONFIG` override, the old app's CWD file.
 fn find_legacy_settings_file() -> Option<PathBuf> {
+    if let Some(config_dir) = dirs::config_dir() {
+        let mut pre_rename_path = config_dir;
+        pre_rename_path.push(PRE_RENAME_CONFIG_DIR_NAME);
+        pre_rename_path.push(SETTINGS_FILE_NAME);
+        if pre_rename_path.is_file() {
+            return Some(pre_rename_path);
+        }
+    }
+
     if let Ok(env_path) = std::env::var("LEGION_KEYBOARD_CONFIG") {
         let path = PathBuf::from(env_path);
         if path.is_file() {

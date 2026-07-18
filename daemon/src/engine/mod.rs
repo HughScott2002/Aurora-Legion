@@ -8,7 +8,7 @@
 //!   keyboard degrades into re-acquisition instead of a dead thread.
 
 use crossbeam_channel::{Receiver, Sender};
-use legion_kb_protocol::{
+use aurora_protocol::{
     custom_effect::{CustomEffect, EffectType},
     effects::{Direction, Effects},
     profile::{self, Profile, COLOR_BYTE_COUNT},

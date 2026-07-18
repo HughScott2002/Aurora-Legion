@@ -12,11 +12,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use legion_kb_protocol::ipc::socket_path;
+use aurora_protocol::ipc::socket_path;
 
 use crate::app::AppMsg;
 
-pub const UNIT_NAME: &str = "legion-kb.service";
+pub const UNIT_NAME: &str = "aurora.service";
 
 /// How long the fallback restart waits for the old daemon's socket to
 /// disappear before spawning a new one.
@@ -66,7 +66,7 @@ where
 
 /// Restart via systemd when the unit exists; otherwise ask the daemon to
 /// exit over the socket, wait until its socket is gone, and spawn a fresh
-/// `legion-kb daemon`.
+/// `aurora daemon`.
 pub fn restart_daemon<F>(unit_available: bool, deliver: F)
 where
     F: Fn(AppMsg) + Send + 'static,
@@ -205,17 +205,17 @@ fn spawn_daemon_process() -> Option<String> {
     }
 }
 
-/// Prefer the `legion-kb` binary that ships next to this GUI binary (nix
+/// Prefer the `aurora` binary that ships next to this GUI binary (nix
 /// store or target dir); fall back to $PATH.
 fn find_daemon_binary() -> PathBuf {
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(dir) = current_exe.parent() {
-            let sibling = dir.join("legion-kb");
+            let sibling = dir.join("aurora");
             if sibling.is_file() {
                 return sibling;
             }
         }
     }
 
-    PathBuf::from("legion-kb")
+    PathBuf::from("aurora")
 }

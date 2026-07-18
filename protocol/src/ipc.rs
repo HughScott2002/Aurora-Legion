@@ -16,9 +16,9 @@ use crate::{custom_effect::CustomEffect, profile::Profile};
 /// a misbehaving peer from ballooning daemon memory.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
-pub const SOCKET_FILE_NAME: &str = "legion-kb-rgb.sock";
+pub const SOCKET_FILE_NAME: &str = "aurora.sock";
 
-/// Path of the daemon socket: `$XDG_RUNTIME_DIR/legion-kb-rgb.sock`, with a
+/// Path of the daemon socket: `$XDG_RUNTIME_DIR/aurora.sock`, with a
 /// `/tmp` fallback for sessions without a runtime dir.
 pub fn socket_path() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR");

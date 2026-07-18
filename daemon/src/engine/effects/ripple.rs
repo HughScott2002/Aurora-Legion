@@ -9,7 +9,7 @@ use std::{
 };
 
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
-use legion_kb_protocol::profile::Profile;
+use aurora_protocol::profile::Profile;
 
 use crate::engine::{effects::zones::KEY_ZONES, Inner};
 

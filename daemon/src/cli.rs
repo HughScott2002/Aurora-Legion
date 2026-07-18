@@ -6,7 +6,7 @@
 use std::{convert::TryInto, path::PathBuf, process::ExitCode, str::FromStr};
 
 use clap::{Args, Subcommand};
-use legion_kb_protocol::{
+use aurora_protocol::{
     custom_effect::CustomEffect,
     effects::{Brightness, Direction, Effects},
     ipc::{Request, Response},
@@ -137,7 +137,7 @@ fn run_status() -> ExitCode {
         Ok(client) => client,
         Err(_) => {
             println!("daemon:   not running");
-            println!("start it with: legion-kb daemon   (or systemctl --user start legion-kb)");
+            println!("start it with: aurora daemon   (or systemctl --user start aurora)");
             return ExitCode::FAILURE;
         }
     };
@@ -145,25 +145,25 @@ fn run_status() -> ExitCode {
     let response = match client.request(Request::GetState) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("legion-kb: {error}");
+            eprintln!("aurora: {error}");
             return ExitCode::FAILURE;
         }
     };
 
     let Response::State { state } = response else {
-        eprintln!("legion-kb: unexpected response to GetState");
+        eprintln!("aurora: unexpected response to GetState");
         return ExitCode::FAILURE;
     };
 
     println!("daemon:   running (v{})", state.version);
     match state.keyboard {
-        legion_kb_protocol::ipc::KeyboardStatus::Connected => println!("keyboard: connected"),
-        legion_kb_protocol::ipc::KeyboardStatus::Searching => println!("keyboard: searching..."),
-        legion_kb_protocol::ipc::KeyboardStatus::PermissionDenied { message } => {
+        aurora_protocol::ipc::KeyboardStatus::Connected => println!("keyboard: connected"),
+        aurora_protocol::ipc::KeyboardStatus::Searching => println!("keyboard: searching..."),
+        aurora_protocol::ipc::KeyboardStatus::PermissionDenied { message } => {
             println!("keyboard: permission denied ({message})");
             println!("          install the udev rule: https://github.com/4JX/L5P-Keyboard-RGB#usage");
         }
-        legion_kb_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
+        aurora_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
     }
 
     let profile_name = state.current.name.unwrap_or_else(|| "(unsaved)".to_string());
@@ -188,7 +188,7 @@ fn run_set(args: &SetArgs) -> ExitCode {
         match args.colors {
             Some(colors) => colors,
             None => {
-                eprintln!("legion-kb: the {} effect requires --colors", args.effect);
+                eprintln!("aurora: the {} effect requires --colors", args.effect);
                 return ExitCode::FAILURE;
             }
         }
@@ -208,7 +208,7 @@ fn run_set(args: &SetArgs) -> ExitCode {
     if let Some(save_path) = &args.save {
         let save_result = profile.save_profile(save_path);
         if save_result.is_err() {
-            eprintln!("legion-kb: could not save profile to {}", save_path.display());
+            eprintln!("aurora: could not save profile to {}", save_path.display());
             return ExitCode::FAILURE;
         }
         println!("profile saved to {}", save_path.display());
@@ -221,7 +221,7 @@ fn run_load_profile(path: &PathBuf) -> ExitCode {
     let profile = match Profile::load_profile(path) {
         Ok(profile) => profile,
         Err(_) => {
-            eprintln!("legion-kb: could not load profile from {}", path.display());
+            eprintln!("aurora: could not load profile from {}", path.display());
             return ExitCode::FAILURE;
         }
     };
@@ -241,8 +241,8 @@ fn apply_profile(profile: Profile) -> ExitCode {
 
 fn apply_profile_directly(profile: &Profile) -> ExitCode {
     if !profile.effect.is_built_in() {
-        eprintln!("legion-kb: no daemon is running, and the {} effect needs one (it is software-driven).", profile.effect);
-        eprintln!("           start the daemon with: legion-kb daemon");
+        eprintln!("aurora: no daemon is running, and the {} effect needs one (it is software-driven).", profile.effect);
+        eprintln!("           start the daemon with: aurora daemon");
         return ExitCode::FAILURE;
     }
 
@@ -252,7 +252,7 @@ fn apply_profile_directly(profile: &Profile) -> ExitCode {
     let keyboard = match keyboard::try_acquire(&stop_signals) {
         AcquireOutcome::Acquired(keyboard) => keyboard,
         AcquireOutcome::Failed(status) => {
-            eprintln!("legion-kb: could not open the keyboard: {status:?}");
+            eprintln!("aurora: could not open the keyboard: {status:?}");
             return ExitCode::FAILURE;
         }
     };
@@ -269,7 +269,7 @@ fn run_custom_effect(path: &PathBuf) -> ExitCode {
     let effect = match CustomEffect::from_file(path) {
         Ok(effect) => effect,
         Err(_) => {
-            eprintln!("legion-kb: could not load custom effect from {}", path.display());
+            eprintln!("aurora: could not load custom effect from {}", path.display());
             return ExitCode::FAILURE;
         }
     };
@@ -280,8 +280,8 @@ fn run_custom_effect(path: &PathBuf) -> ExitCode {
             print_outcome(response, "custom effect playing")
         }
         Err(_) => {
-            eprintln!("legion-kb: no daemon is running; custom effects need one.");
-            eprintln!("           start the daemon with: legion-kb daemon");
+            eprintln!("aurora: no daemon is running; custom effects need one.");
+            eprintln!("           start the daemon with: aurora daemon");
             ExitCode::FAILURE
         }
     }
@@ -291,7 +291,7 @@ fn run_simple_request(request: Request, success_message: &str) -> ExitCode {
     let mut client = match Client::connect() {
         Ok(client) => client,
         Err(_) => {
-            eprintln!("legion-kb: no daemon is running.");
+            eprintln!("aurora: no daemon is running.");
             return ExitCode::FAILURE;
         }
     };
@@ -307,15 +307,15 @@ fn print_outcome(response: Result<Response, ClientError>, success_message: &str)
             ExitCode::SUCCESS
         }
         Ok(Response::Error { kind, message }) => {
-            eprintln!("legion-kb: {kind:?}: {message}");
+            eprintln!("aurora: {kind:?}: {message}");
             ExitCode::FAILURE
         }
         Ok(_) => {
-            eprintln!("legion-kb: unexpected response type");
+            eprintln!("aurora: unexpected response type");
             ExitCode::FAILURE
         }
         Err(error) => {
-            eprintln!("legion-kb: {error}");
+            eprintln!("aurora: {error}");
             ExitCode::FAILURE
         }
     }

@@ -1,5 +1,5 @@
 {
-  description = "Daemon + GTK4 app to control the RGB keyboard of Lenovo Legion laptops";
+  description = "Aurora — daemon + native GTK4 app for the RGB keyboard of Lenovo Legion laptops";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -32,7 +32,7 @@
       systems = import systems;
 
       flake = {
-        # Per-user service: installs the package and runs `legion-kb daemon`
+        # Per-user service: installs the package and runs `aurora daemon`
         # as a systemd user service bound to the graphical session.
         homeModules.default =
           {
@@ -42,25 +42,25 @@
             ...
           }:
           let
-            cfg = config.services.legion-kb-rgb;
+            cfg = config.services.aurora;
           in
           {
-            options.services.legion-kb-rgb = {
-              enable = lib.mkEnableOption "the Legion keyboard RGB daemon";
+            options.services.aurora = {
+              enable = lib.mkEnableOption "the Aurora keyboard lighting daemon";
 
               package = lib.mkOption {
                 type = lib.types.package;
                 default = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-                description = "The legion-kb package to run.";
+                description = "The aurora package to run.";
               };
             };
 
             config = lib.mkIf cfg.enable {
               home.packages = [ cfg.package ];
 
-              systemd.user.services.legion-kb = {
+              systemd.user.services.aurora = {
                 Unit = {
-                  Description = "Legion keyboard RGB daemon";
+                  Description = "Aurora keyboard lighting daemon";
                   # The ambient, ripple and hotkey features need the session
                   # environment (WAYLAND_DISPLAY/DISPLAY), hence
                   # graphical-session.target instead of default.target.
@@ -68,7 +68,7 @@
                   PartOf = [ "graphical-session.target" ];
                 };
                 Service = {
-                  ExecStart = "${cfg.package}/bin/legion-kb daemon";
+                  ExecStart = "${cfg.package}/bin/aurora daemon";
                   Restart = "on-failure";
                   RestartSec = 2;
                 };
@@ -84,7 +84,7 @@
         nixosModules.default =
           { config, lib, ... }:
           let
-            cfg = config.hardware.legion-kb-rgb;
+            cfg = config.hardware.aurora;
 
             # (vendor, product) pairs of every supported keyboard controller,
             # mirroring KNOWN_DEVICE_INFOS in driver/src/lib.rs.
@@ -107,7 +107,7 @@
             '';
           in
           {
-            options.hardware.legion-kb-rgb = {
+            options.hardware.aurora = {
               enable = lib.mkEnableOption "udev rules granting seat users access to the Legion RGB keyboard";
             };
 
@@ -251,8 +251,8 @@
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-          # Daemon + CLI (`legion-kb`) and GTK4 GUI (`legion-kb-gui`)
-          legion-kb = craneLib.buildPackage (
+          # Daemon + CLI (`aurora`) and GTK4 GUI (`aurora-gui`)
+          aurora = craneLib.buildPackage (
             commonArgs
             // {
               meta.mainProgram = pname;
@@ -261,12 +261,12 @@
               doCheck = true;
 
               postInstall = ''
-                install -Dm444 gui/data/com.github.hugh.LegionKbRgb.desktop -t $out/share/applications
-                install -Dm444 gui/data/icons/hicolor/scalable/apps/com.github.hugh.LegionKbRgb.svg -t $out/share/icons/hicolor/scalable/apps
+                install -Dm444 gui/data/io.github.HughScott2002.Aurora.desktop -t $out/share/applications
+                install -Dm444 gui/data/icons/hicolor/scalable/apps/io.github.HughScott2002.Aurora.svg -t $out/share/icons/hicolor/scalable/apps
 
-                install -Dm444 systemd/legion-kb.service -t $out/lib/systemd/user
-                substituteInPlace $out/lib/systemd/user/legion-kb.service \
-                  --replace-fail "ExecStart=legion-kb daemon" "ExecStart=$out/bin/legion-kb daemon"
+                install -Dm444 systemd/aurora.service -t $out/lib/systemd/user
+                substituteInPlace $out/lib/systemd/user/aurora.service \
+                  --replace-fail "ExecStart=aurora daemon" "ExecStart=$out/bin/aurora daemon"
               '';
 
               # wrapGAppsHook4 turns bin/* into wrapper scripts; patch the
@@ -287,10 +287,10 @@
             overlays = [ (import rust-overlay) ];
           };
 
-          packages.default = legion-kb;
+          packages.default = aurora;
 
-          apps.default.program = "${legion-kb}/bin/legion-kb-gui";
-          apps.daemon.program = "${legion-kb}/bin/${pname}";
+          apps.default.program = "${aurora}/bin/aurora-gui";
+          apps.daemon.program = "${aurora}/bin/${pname}";
 
           devShells.default =
             let

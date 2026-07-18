@@ -12,7 +12,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use legion_kb_protocol::{
+use aurora_protocol::{
     ipc::{DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus, Request, Response, ResponseEnvelope},
     profile::Profile,
 };
@@ -237,7 +237,7 @@ impl Core {
         Response::Ok
     }
 
-    fn play_custom_effect(&mut self, effect: legion_kb_protocol::custom_effect::CustomEffect) -> Response {
+    fn play_custom_effect(&mut self, effect: aurora_protocol::custom_effect::CustomEffect) -> Response {
         if effect.effect_steps.is_empty() {
             return error_response(ErrorKind::InvalidRequest, "custom effect has no steps");
         }
@@ -356,7 +356,7 @@ impl Core {
         self.set_profile(next_profile)
     }
 
-    fn add_custom_effect(&mut self, effect: legion_kb_protocol::custom_effect::CustomEffect) -> Response {
+    fn add_custom_effect(&mut self, effect: aurora_protocol::custom_effect::CustomEffect) -> Response {
         let Some(name) = effect.name.clone() else {
             return error_response(ErrorKind::InvalidRequest, "custom effect needs a name to be saved");
         };
@@ -479,7 +479,7 @@ fn validate_profile(profile: &Profile) -> Option<Response> {
         ));
     }
 
-    if let legion_kb_protocol::effects::Effects::AmbientLight { fps, saturation_boost } = profile.effect {
+    if let aurora_protocol::effects::Effects::AmbientLight { fps, saturation_boost } = profile.effect {
         if !(1..=60).contains(&fps) {
             return Some(error_response(ErrorKind::InvalidRequest, &format!("ambient fps {fps} outside 1..=60")));
         }

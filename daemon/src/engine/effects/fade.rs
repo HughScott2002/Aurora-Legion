@@ -8,7 +8,7 @@ use std::{
 };
 
 use device_query::DeviceQuery;
-use legion_kb_protocol::profile::Profile;
+use aurora_protocol::profile::Profile;
 
 use crate::engine::Inner;
 

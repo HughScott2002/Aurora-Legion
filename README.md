@@ -1,12 +1,12 @@
 <div align="center">
 
-# legion-kb
+# Aurora
 
 **A minimal daemon + native GTK4 app for the 4-zone RGB keyboard in Lenovo Legion laptops.**
 
 A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB), whose reverse-engineered driver and effect engine make this project possible.
 
-<img src="docs/screenshot.png" alt="legion-kb GTK4 interface" width="560"/>
+<img src="docs/screenshot.png" alt="aurora GTK4 interface" width="560"/>
 
 </div>
 
@@ -16,9 +16,9 @@ The original ships everything — driver, effect threads, tray icon, UI — in o
 
 ```mermaid
 graph LR
-    GUI["legion-kb-gui<br/>GTK4 + libadwaita"] -- "JSON over<br/>unix socket" --> D
-    CLI["legion-kb<br/>set · status · cycle-profile"] -- "same socket" --> D
-    D["legion-kb daemon<br/>effect engine · profiles · settings"] -- hidapi --> KB[("4-zone<br/>keyboard")]
+    GUI["aurora-gui<br/>GTK4 + libadwaita"] -- "JSON over<br/>unix socket" --> D
+    CLI["aurora<br/>set · status · cycle-profile"] -- "same socket" --> D
+    D["aurora daemon<br/>effect engine · profiles · settings"] -- hidapi --> KB[("4-zone<br/>keyboard")]
     SD["systemd --user"] -. "starts at login" .-> D
 ```
 
@@ -37,31 +37,31 @@ The daemon owns everything stateful behind one command loop (one thread mutates 
 
 ```nix
 # flake inputs
-legion-kb.url = "github:HughScott2002/legion-kb";
+aurora.url = "github:HughScott2002/aurora";
 
 # home-manager: run the daemon at login
-imports = [ legion-kb.homeModules.default ];
-services.legion-kb-rgb.enable = true;
+imports = [ aurora.homeModules.default ];
+services.aurora.enable = true;
 
 # nixos: let your user open the keyboard without root
-imports = [ legion-kb.nixosModules.default ];
-hardware.legion-kb-rgb.enable = true;
+imports = [ aurora.nixosModules.default ];
+hardware.aurora.enable = true;
 ```
 
-Or just try it: `nix run github:HughScott2002/legion-kb` (GUI) — `nix run github:HughScott2002/legion-kb#daemon` first if the service isn't running.
+Or just try it: `nix run github:HughScott2002/aurora` (GUI) — `nix run github:HughScott2002/aurora#daemon` first if the service isn't running.
 
 ## CLI
 
 ```console
-$ legion-kb status
+$ aurora status
 daemon:   running (v0.21.0)
 keyboard: connected
 profile:  gaming — Static effect
 
-$ legion-kb set -e Swipe -c 255,0,0,0,255,0,0,0,255,255,0,255 -s 3
+$ aurora set -e Swipe -c 255,0,0,0,255,0,0,0,255,255,0,255 -s 3
 profile applied        # keeps running after the CLI exits — it lives in the daemon
 
-$ legion-kb cycle-profile   # bind this to a GNOME shortcut for Wayland-native switching
+$ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native switching
 ```
 
 ## Credits

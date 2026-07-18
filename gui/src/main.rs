@@ -6,7 +6,7 @@ mod preview;
 
 use relm4::RelmApp;
 
-const APP_ID: &str = "com.github.hugh.LegionKbRgb";
+const APP_ID: &str = "io.github.HughScott2002.Aurora";
 
 fn main() {
     let app = RelmApp::new(APP_ID);

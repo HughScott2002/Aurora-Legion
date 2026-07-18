@@ -1,12 +1,12 @@
 [package]
-name = "legion-kb"
+name = "aurora"
 version = "0.21.0"
 edition = "2021"
 license = "GPL-3.0"
 
 [dependencies]
 legion-rgb-driver = { path = "../driver" }
-legion-kb-protocol = { path = "../protocol" }
+aurora-protocol = { path = "../protocol" }
 
 clap = { version = "4.5.37", features = ["color", "cargo", "derive"] }
 

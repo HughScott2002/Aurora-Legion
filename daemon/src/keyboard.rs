@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use legion_kb_protocol::ipc::KeyboardStatus;
+use aurora_protocol::ipc::KeyboardStatus;
 use legion_rgb_driver::Keyboard;
 
 use crate::engine::StopSignals;

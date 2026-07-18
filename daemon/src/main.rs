@@ -10,14 +10,14 @@ mod settings;
 use std::sync::{atomic::AtomicBool, Arc};
 
 use clap::{Parser, Subcommand};
-use legion_kb_protocol::ipc::socket_path;
+use aurora_protocol::ipc::socket_path;
 
 /// Commands from every source (IPC clients, hotkey) funnel into the core
 /// through one bounded queue.
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 
 #[derive(Parser)]
-#[command(author, version, about = "Legion keyboard RGB daemon and control CLI", name = "legion-kb")]
+#[command(author, version, about = "Aurora — Legion keyboard lighting daemon and control CLI", name = "aurora")]
 struct Cli {
     #[command(subcommand)]
     command: CliCommand,
@@ -41,7 +41,7 @@ fn main() -> std::process::ExitCode {
             std::process::ExitCode::SUCCESS
         }
         CliCommand::Client(command) => {
-            // Client commands only: piping output (`legion-kb list | head`)
+            // Client commands only: piping output (`aurora list | head`)
             // must end the process quietly like any unix tool. The daemon
             // must NOT do this — it relies on ignored SIGPIPE to survive
             // clients that disconnect mid-write.
@@ -58,7 +58,7 @@ fn restore_default_sigpipe_for_cli() {
         })
     };
     if let Err(error) = register_result {
-        eprintln!("legion-kb: could not restore SIGPIPE handling: {error}");
+        eprintln!("aurora: could not restore SIGPIPE handling: {error}");
     }
 }
 
@@ -70,16 +70,16 @@ fn run_daemon() {
     let listener = match server::bind_socket(&path) {
         server::BindOutcome::Bound(listener) => listener,
         server::BindOutcome::AlreadyRunning => {
-            eprintln!("legion-kb: another daemon is already running on {}", path.display());
+            eprintln!("aurora: another daemon is already running on {}", path.display());
             std::process::exit(1);
         }
         server::BindOutcome::Failed(error) => {
-            eprintln!("legion-kb: could not bind {}: {error}", path.display());
+            eprintln!("aurora: could not bind {}: {error}", path.display());
             std::process::exit(1);
         }
     };
 
-    eprintln!("legion-kb: daemon v{} listening on {}", env!("CARGO_PKG_VERSION"), path.display());
+    eprintln!("aurora: daemon v{} listening on {}", env!("CARGO_PKG_VERSION"), path.display());
 
     let (command_tx, command_rx) = crossbeam_channel::bounded(COMMAND_QUEUE_CAPACITY);
 
@@ -98,10 +98,10 @@ fn run_daemon() {
 
     let remove_result = std::fs::remove_file(&path);
     if let Err(error) = remove_result {
-        eprintln!("legion-kb: could not remove socket {}: {error}", path.display());
+        eprintln!("aurora: could not remove socket {}: {error}", path.display());
     }
 
-    eprintln!("legion-kb: daemon stopped");
+    eprintln!("aurora: daemon stopped");
 }
 
 fn register_shutdown_signals(shutdown_flag: &Arc<AtomicBool>) {
@@ -114,12 +114,12 @@ fn register_shutdown_signals(shutdown_flag: &Arc<AtomicBool>) {
     for signal in signals {
         let register_result = signal_hook::flag::register_conditional_shutdown(signal, 1, shutdown_flag.clone());
         if let Err(error) = register_result {
-            eprintln!("legion-kb: could not register forced shutdown for signal {signal}: {error}");
+            eprintln!("aurora: could not register forced shutdown for signal {signal}: {error}");
         }
 
         let register_result = signal_hook::flag::register(signal, shutdown_flag.clone());
         if let Err(error) = register_result {
-            eprintln!("legion-kb: could not register signal {signal}: {error}");
+            eprintln!("aurora: could not register signal {signal}: {error}");
         }
     }
 }

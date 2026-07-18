@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use legion_kb_protocol::ipc::{socket_path, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES};
+use aurora_protocol::ipc::{socket_path, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES};
 
 /// A CLI request/response round trip should be instant on a local socket;
 /// anything slower means a wedged daemon and the CLI should say so.

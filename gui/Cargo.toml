@@ -1,11 +1,11 @@
 [package]
-name = "legion-kb-gui"
+name = "aurora-gui"
 version = "0.21.0"
 edition = "2021"
 license = "GPL-3.0"
 
 [dependencies]
-legion-kb-protocol = { path = "../protocol" }
+aurora-protocol = { path = "../protocol" }
 
 # gnome_48 targets GTK 4.18 / libadwaita 1.7 — safely below the system
 # libraries (GTK 4.20 / adw 1.8) while covering every widget in use.

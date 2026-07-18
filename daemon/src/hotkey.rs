@@ -4,7 +4,7 @@
 //! while a graphical session exists — which the systemd unit guarantees by
 //! binding to `graphical-session.target`. If the display connection cannot
 //! be opened the hotkey is disabled and the daemon carries on;
-//! `legion-kb cycle-profile` bound to a GNOME shortcut is the reliable path.
+//! `aurora cycle-profile` bound to a GNOME shortcut is the reliable path.
 
 use std::{panic, thread, time::Duration};
 

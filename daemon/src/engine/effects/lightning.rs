@@ -1,6 +1,6 @@
 use std::{sync::atomic::Ordering, thread, time::Duration};
 
-use legion_kb_protocol::profile::Profile;
+use aurora_protocol::profile::Profile;
 use rand::{rngs::ThreadRng, Rng};
 
 use crate::engine::Inner;

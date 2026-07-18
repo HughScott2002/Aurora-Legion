@@ -6,7 +6,7 @@
 
 use std::cell::Cell;
 
-use legion_kb_protocol::{
+use aurora_protocol::{
     effects::{Brightness, Direction, Effects, SwipeMode},
     ipc::{DaemonState, KeyboardStatus, Request},
     profile::Profile,
@@ -95,7 +95,7 @@ impl SimpleComponent for App {
 
     fn init_root() -> Self::Root {
         adw::ApplicationWindow::builder()
-            .title("Legion RGB")
+            .title("Aurora")
             .default_width(WINDOW_DEFAULT_WIDTH)
             .default_height(WINDOW_DEFAULT_HEIGHT)
             .build()
@@ -386,7 +386,7 @@ impl SimpleComponent for App {
                     return; // Echo from update_view.
                 }
                 if !self.autostart_available {
-                    self.queue_toast("No systemd unit found — install the legion-kb.service unit first");
+                    self.queue_toast("No systemd unit found — install the aurora.service unit first");
                     return;
                 }
                 if self.autostart_managed {
@@ -535,7 +535,7 @@ impl App {
             }
         };
 
-        let mut effect: legion_kb_protocol::custom_effect::CustomEffect = match serde_json::from_str(&contents) {
+        let mut effect: aurora_protocol::custom_effect::CustomEffect = match serde_json::from_str(&contents) {
             Ok(effect) => effect,
             Err(error) => {
                 self.queue_toast(&format!("Not a valid custom effect file: {error}"));
