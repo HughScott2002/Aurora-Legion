@@ -92,7 +92,9 @@ impl Keyboard {
     pub fn refresh(&mut self) -> Result<()> {
         let payload = self.build_payload()?;
 
-        self.keyboard_hid.send_feature_report(&payload).unwrap();
+        // Propagate instead of unwrapping: this is the call that fails when
+        // the keyboard is unplugged, and callers need to see that error.
+        self.keyboard_hid.send_feature_report(&payload)?;
 
         Ok(())
     }
