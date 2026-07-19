@@ -12,7 +12,7 @@ Windows support is planned, not dropped. It arrives as a second native
 shell on the same core once the Linux experience is complete. Until
 then Windows users lose nothing: L5P-Keyboard-RGB keeps working there.
 
-Two rules hold across every milestone:
+Two things hold across every milestone:
 
 1. Serve the bottleneck first. Windows has adequate options today;
    Linux does not. Effort goes where users are actually stuck.
