@@ -1,14 +1,21 @@
 # Roadmap
 
-Aurora is Linux-first. The goal is a keyboard tool that feels native on
-Linux the way Ghostty feels native in a terminal: small, fast, at home
-on the desktop it runs on. Windows support comes after that bar is met,
-as a second native shell on the same core, never at Linux's expense.
+Aurora targets the platform where the gap is. On Windows, Legion
+owners already have working options: Lenovo's own software and
+[L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB), the
+project Aurora forked from, both control these keyboards today. On
+Linux there is no native-feeling option: lighting that dies with the
+window, no Wayland story, no daemon. That gap is why Aurora exists,
+and it is where the work goes first.
+
+Windows support is planned, not dropped. It arrives as a second native
+shell on the same core once the Linux experience is complete. Until
+then Windows users lose nothing: L5P-Keyboard-RGB keeps working there.
 
 Two rules hold across every milestone:
 
-1. Linux is the flagship, not the port source. Nothing ships for
-   Windows until Linux is excellent.
+1. Serve the bottleneck first. Windows has adequate options today;
+   Linux does not. Effort goes where users are actually stuck.
 2. Later milestones must not regress earlier ones. `nix build` stays
    the pre-push gate, and the daemon's measured footprint
    ([~10 MiB resident](docs/measurements.md)) is a budget, not a brag.
@@ -67,7 +74,9 @@ green. Prepares the core to compile for Windows.
 
 ## M4: Windows core
 
-`aurora.exe` daemon + CLI running on real hardware. No GUI yet.
+`aurora.exe` daemon + CLI running on real hardware. No GUI yet. Until
+this milestone lands, Windows users are best served by
+L5P-Keyboard-RGB or Lenovo's software.
 
 - [ ] Daemon binds the named pipe, serves the same protocol.
 - [ ] `aurora autostart enable` writes the HKCU Run key (same CLI verb
