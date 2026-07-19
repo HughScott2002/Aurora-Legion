@@ -13,7 +13,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use aurora_protocol::ipc::{socket_path, DaemonState, Event, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES};
+use aurora_protocol::ipc::{socket_path, DaemonState, Event, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES, PROTOCOL_VERSION};
 
 /// Delays between reconnect attempts; the last entry repeats. Fast enough
 /// that "start daemon → window comes alive" feels immediate.
@@ -115,7 +115,11 @@ where
     let mut writer = stream;
     let mut next_id: u64 = 1;
 
-    let handshake = [Request::Subscribe, Request::GetState];
+    let handshake = [
+        Request::Hello { protocol_version: PROTOCOL_VERSION },
+        Request::Subscribe,
+        Request::GetState,
+    ];
     for request in handshake {
         if !write_request(&mut writer, &mut next_id, &request) {
             let _ = reader_handle.join();
@@ -214,6 +218,16 @@ where
             }
             ServerMessage::Response(envelope) => match envelope.resp {
                 Response::State { state } => deliver(IpcUpdate::State(Box::new(state))),
+                Response::Hello { protocol_version, daemon_version } => {
+                    // Mismatch is surfaced but the connection stays up: the
+                    // state view may still render, and the message tells the
+                    // user why anything else misbehaves.
+                    if protocol_version != PROTOCOL_VERSION {
+                        deliver(IpcUpdate::RequestFailed(format!(
+                            "daemon {daemon_version} speaks protocol v{protocol_version}, this app speaks v{PROTOCOL_VERSION}; update the older side"
+                        )));
+                    }
+                }
                 Response::Error { kind, message } => {
                     deliver(IpcUpdate::RequestFailed(format!("{kind:?}: {message}")));
                 }

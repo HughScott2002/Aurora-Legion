@@ -16,6 +16,15 @@ use crate::{custom_effect::CustomEffect, profile::Profile};
 /// a misbehaving peer from ballooning daemon memory.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
+/// Version of the IPC schema in this file. Bump on any change that an
+/// existing client would misread: renamed fields, removed variants, changed
+/// semantics. Additive changes (new requests, new optional fields) do not
+/// bump it; unknown variants already fail parsing loudly.
+///
+/// Clients send [`Request::Hello`] first and compare the daemon's answer;
+/// see `docs/protocol.md` for the negotiation rules.
+pub const PROTOCOL_VERSION: u32 = 1;
+
 pub const SOCKET_FILE_NAME: &str = "aurora.sock";
 
 /// Path of the daemon socket: `$XDG_RUNTIME_DIR/aurora.sock`, with a
@@ -47,6 +56,11 @@ pub struct RequestEnvelope {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
 pub enum Request {
+    /// Version handshake. Send first on a new connection; the daemon
+    /// answers [`Response::Hello`]. A daemon too old to know this request
+    /// answers `Error { kind: InvalidRequest }` instead, which clients
+    /// should report as a version mismatch, not a protocol failure.
+    Hello { protocol_version: u32 },
     /// Return the full daemon state.
     GetState,
     /// Make `profile` the live profile and apply it to the keyboard.
@@ -85,6 +99,11 @@ pub struct ResponseEnvelope {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
 pub enum Response {
+    /// Answer to [`Request::Hello`]. `protocol_version` is the daemon's
+    /// [`PROTOCOL_VERSION`]; `daemon_version` is its package version.
+    /// The daemon answers regardless of the client's version (and logs a
+    /// warning on mismatch); enforcement is the client's call.
+    Hello { protocol_version: u32, daemon_version: String },
     Ok,
     State { state: DaemonState },
     Profiles { profiles: Vec<Profile> },
@@ -209,6 +228,48 @@ mod tests {
 
         assert!(matches!(parsed_response, ServerMessage::Response(_)));
         assert!(matches!(parsed_event, ServerMessage::Event(_)));
+    }
+
+    #[test]
+    fn hello_round_trips() {
+        let request = RequestEnvelope {
+            id: 1,
+            req: Request::Hello { protocol_version: PROTOCOL_VERSION },
+        };
+        let response = ResponseEnvelope {
+            id: 1,
+            resp: Response::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                daemon_version: "0.21.0".to_string(),
+            },
+        };
+
+        let request_json = serde_json::to_string(&request).unwrap();
+        let response_json = serde_json::to_string(&response).unwrap();
+
+        let parsed_request: RequestEnvelope = serde_json::from_str(&request_json).unwrap();
+        let parsed_response: ResponseEnvelope = serde_json::from_str(&response_json).unwrap();
+
+        assert_eq!(request, parsed_request);
+        assert_eq!(response, parsed_response);
+    }
+
+    /// The exact wire shape is a public contract (docs/protocol.md);
+    /// this test pins it so a serde attribute change cannot drift silently.
+    #[test]
+    fn hello_wire_format_is_stable() {
+        let json = r#"{"id":1,"req":{"type":"Hello","protocol_version":1}}"#;
+        let parsed: RequestEnvelope = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.req, Request::Hello { protocol_version: 1 });
+    }
+
+    /// Clients that never send Hello (all pre-handshake clients) must keep
+    /// working; the handshake is opt-in.
+    #[test]
+    fn requests_without_hello_still_parse() {
+        let json = r#"{"id":2,"req":{"type":"GetState"}}"#;
+        let parsed: RequestEnvelope = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.req, Request::GetState);
     }
 
     #[test]

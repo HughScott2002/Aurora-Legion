@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use aurora_protocol::ipc::{socket_path, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES};
+use aurora_protocol::ipc::{socket_path, ErrorKind, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES, PROTOCOL_VERSION};
 
 /// A CLI request/response round trip should be instant on a local socket;
 /// anything slower means a wedged daemon and the CLI should say so.
@@ -45,16 +45,49 @@ impl Client {
 
         let read_stream = stream.try_clone().map_err(ClientError::Io)?;
 
-        Ok(Self {
+        let mut client = Self {
             reader: BufReader::new(read_stream),
             writer: stream,
             next_id: 1,
-        })
+        };
+        client.handshake()?;
+        Ok(client)
+    }
+
+    /// Version handshake, run once per connection. A protocol mismatch is a
+    /// hard error (later requests would fail in stranger ways); a daemon too
+    /// old to know `Hello` gets a warning and the benefit of the doubt.
+    fn handshake(&mut self) -> Result<(), ClientError> {
+        let envelope_id = self.send(Request::Hello { protocol_version: PROTOCOL_VERSION })?;
+        // accept_unattributed_error: a pre-handshake daemon cannot parse
+        // `Hello` at all and answers the parse error with envelope id 0.
+        let response = self.wait_for_response(envelope_id, true)?;
+
+        match response {
+            Response::Hello { protocol_version, daemon_version } => {
+                if protocol_version != PROTOCOL_VERSION {
+                    return Err(ClientError::Protocol(format!(
+                        "daemon {daemon_version} speaks protocol v{protocol_version}, this CLI speaks v{PROTOCOL_VERSION}; update the older side"
+                    )));
+                }
+                Ok(())
+            }
+            Response::Error { kind: ErrorKind::InvalidRequest, .. } => {
+                eprintln!("aurora: daemon predates the version handshake; continuing, but consider updating it");
+                Ok(())
+            }
+            other => Err(ClientError::Protocol(format!("unexpected handshake response: {other:?}"))),
+        }
     }
 
     /// Send one request and wait for its response. Event lines that arrive
     /// in between (possible once subscribed) are skipped.
     pub fn request(&mut self, request: Request) -> Result<Response, ClientError> {
+        let envelope_id = self.send(request)?;
+        self.wait_for_response(envelope_id, false)
+    }
+
+    fn send(&mut self, request: Request) -> Result<u64, ClientError> {
         let envelope_id = self.next_id;
         self.next_id += 1;
 
@@ -62,7 +95,14 @@ impl Client {
         let serialized = serde_json::to_string(&envelope).map_err(|error| ClientError::Protocol(error.to_string()))?;
 
         writeln!(self.writer, "{serialized}").map_err(ClientError::Io)?;
+        Ok(envelope_id)
+    }
 
+    /// Read lines until the response for `envelope_id` arrives. With
+    /// `accept_unattributed_error`, an `Error` response carrying envelope
+    /// id 0 is also returned: that id marks a request the daemon could not
+    /// parse at all (see the server's protocol-error path).
+    fn wait_for_response(&mut self, envelope_id: u64, accept_unattributed_error: bool) -> Result<Response, ClientError> {
         let mut line = String::new();
         loop {
             line.clear();
@@ -78,6 +118,10 @@ impl Client {
 
             match message {
                 ServerMessage::Response(response_envelope) => {
+                    let unattributed_error = response_envelope.id == 0 && matches!(response_envelope.resp, Response::Error { .. });
+                    if accept_unattributed_error && unattributed_error {
+                        return Ok(response_envelope.resp);
+                    }
                     if response_envelope.id != envelope_id {
                         return Err(ClientError::Protocol(format!(
                             "response id {} does not match request id {envelope_id}",

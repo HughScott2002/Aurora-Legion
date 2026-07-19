@@ -38,7 +38,7 @@ first-party tool on the desktop they target.
 - [ ] Ambient effect reliability on Wayland: survive portal
       re-authorization, degrade gracefully with clear UI state when
       capture is unavailable. Issue: #7
-- [ ] Protocol contract: `docs/protocol.md` covering every request,
+- [x] Protocol contract: `docs/protocol.md` covering every request,
       response and event, plus a `Hello { protocol_version }`
       handshake. This is what makes third-party frontends (TUI, KDE)
       possible without daemon changes. Issue: #8

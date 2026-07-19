@@ -217,6 +217,21 @@ impl Core {
 
     fn handle_request(&mut self, request: Request, out_tx: &Sender<Outbound>) -> Response {
         match request {
+            Request::Hello { protocol_version } => {
+                // Answer regardless of the client's version; the client
+                // decides whether to proceed. The log line is for the case
+                // where the client carries on anyway and later requests fail.
+                if protocol_version != aurora_protocol::ipc::PROTOCOL_VERSION {
+                    eprintln!(
+                        "core: client speaks protocol v{protocol_version}, daemon speaks v{}",
+                        aurora_protocol::ipc::PROTOCOL_VERSION
+                    );
+                }
+                Response::Hello {
+                    protocol_version: aurora_protocol::ipc::PROTOCOL_VERSION,
+                    daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+                }
+            }
             Request::GetState => Response::State { state: self.state_snapshot() },
             Request::Subscribe => {
                 self.subscribers.push(out_tx.clone());
