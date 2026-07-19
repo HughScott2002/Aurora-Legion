@@ -10,7 +10,7 @@ A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-
   <a href="#install-nixos--home-manager"><img src="https://img.shields.io/badge/-Install-ff2740?style=for-the-badge" alt="Install" /></a>&nbsp;
   <a href="#cli"><img src="https://img.shields.io/badge/-CLI-37f558?style=for-the-badge" alt="CLI" /></a>&nbsp;
   <a href="#measured-not-claimed"><img src="https://img.shields.io/badge/-Measurements-3584e4?style=for-the-badge" alt="Measurements" /></a>&nbsp;
-  <a href="https://github.com/HughScott2002/aurora/discussions"><img src="https://img.shields.io/badge/-Discussions-e01b96?style=for-the-badge" alt="Discussions" /></a>
+  <a href="https://github.com/HughScott2002/Aurora-Legion/discussions"><img src="https://img.shields.io/badge/-Discussions-e01b96?style=for-the-badge" alt="Discussions" /></a>
 </p>
 
 <p>
@@ -69,7 +69,7 @@ Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s w
 
 ```nix
 # flake inputs
-aurora.url = "github:HughScott2002/aurora";
+aurora.url = "github:HughScott2002/Aurora-Legion";
 
 # home-manager: run the daemon at login
 imports = [ aurora.homeModules.default ];
@@ -80,7 +80,7 @@ imports = [ aurora.nixosModules.default ];
 hardware.aurora.enable = true;
 ```
 
-Or just try it: `nix run github:HughScott2002/aurora` (GUI); run `nix run github:HughScott2002/aurora#daemon` first if the service isn't running. Building from a clone: [docs/quick-start.md](docs/quick-start.md).
+Or just try it: `nix run github:HughScott2002/Aurora-Legion` (GUI); run `nix run github:HughScott2002/Aurora-Legion#daemon` first if the service isn't running. Building from a clone: [docs/quick-start.md](docs/quick-start.md).
 
 ## CLI
 
@@ -98,7 +98,7 @@ $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native swit
 
 ## Community
 
-[Discussions are open](https://github.com/HughScott2002/aurora/discussions); questions, ideas and show-and-tell all welcome. PRs too, especially new frontends: the [`protocol`](protocol/) crate is the seam (JSON over a unix socket), so a TUI, KDE or web client needs zero daemon changes. Start with [CONTRIBUTING.md](CONTRIBUTING.md); the code rules live in [docs/style-guide.md](docs/style-guide.md).
+[Discussions are open](https://github.com/HughScott2002/Aurora-Legion/discussions); questions, ideas and show-and-tell all welcome. PRs too, especially new frontends: the [`protocol`](protocol/) crate is the seam (JSON over a unix socket), so a TUI, KDE or web client needs zero daemon changes. Start with [CONTRIBUTING.md](CONTRIBUTING.md); the code rules live in [docs/style-guide.md](docs/style-guide.md).
 
 ## Credits
 

@@ -6,8 +6,8 @@ flakes enabled; there is no other supported toolchain setup.
 ## Just run it
 
 ```console
-$ nix run github:HughScott2002/aurora#daemon &   # or from a clone: nix run .#daemon
-$ nix run github:HughScott2002/aurora            # the GTK app
+$ nix run github:HughScott2002/Aurora-Legion#daemon &   # or from a clone: nix run .#daemon
+$ nix run github:HughScott2002/Aurora-Legion            # the GTK app
 ```
 
 If the daemon reports `permission denied` for the keyboard, your user
@@ -16,7 +16,7 @@ cannot open the hidraw device yet; see [Keyboard access](#keyboard-access).
 ## Hack on it
 
 ```console
-$ git clone https://github.com/HughScott2002/aurora && cd aurora
+$ git clone https://github.com/HughScott2002/Aurora-Legion && cd Aurora-Legion
 $ git config core.hooksPath hooks     # build gate: nix build runs before every push
 $ nix develop                         # toolchain + GTK4 + all native deps
 $ export CXXFLAGS="-include cstdint"  # webm-sys needs it outside `nix build`
