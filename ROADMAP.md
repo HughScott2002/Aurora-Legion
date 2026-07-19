@@ -29,19 +29,19 @@ Native feel complete on GNOME/Wayland. The GUI and daemon behave like a
 first-party tool on the desktop they target.
 
 - [ ] GUI polish pass against the GNOME HIG: spacing, typography,
-      keyboard preview refinement, accessibility.
+      keyboard preview refinement, accessibility. Issue: #4
 - [ ] Deliberate empty and error states: daemon not running, keyboard
       unplugged, permission missing. Every failure visible and
-      recoverable from the UI.
+      recoverable from the UI. Issue: #5
 - [ ] Wayland-native hotkeys via the XDG GlobalShortcuts portal,
-      replacing evdev polling; works on any Wayland compositor.
+      replacing evdev polling; works on any Wayland compositor. Issue: #6
 - [ ] Ambient effect reliability on Wayland: survive portal
       re-authorization, degrade gracefully with clear UI state when
-      capture is unavailable.
+      capture is unavailable. Issue: #7
 - [ ] Protocol contract: `docs/protocol.md` covering every request,
       response and event, plus a `Hello { protocol_version }`
       handshake. This is what makes third-party frontends (TUI, KDE)
-      possible without daemon changes.
+      possible without daemon changes. Issue: #8
 
 ## M2: Linux everywhere
 
