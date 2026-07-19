@@ -18,7 +18,7 @@ A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-
   <img src="https://img.shields.io/badge/GTK4-libadwaita-4A86CF?logo=gnome&logoColor=white" alt="GTK4 + libadwaita" />
   <img src="https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos&logoColor=white" alt="Nix flake" />
   <img src="https://img.shields.io/badge/systemd-user_service-2d2d2d" alt="systemd user service" />
-  <img src="https://img.shields.io/badge/resident_memory-10_MiB-37f558" alt="Resident memory 10 MiB" />
+  <img src="https://img.shields.io/badge/resident_daemon_memory-10_MiB-37f558" alt="Resident daemon memory 10 MiB" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0" />
 </p>
 
@@ -29,6 +29,8 @@ A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-
 ## Why a rearchitecture
 
 The original ships everything (driver, effect threads, tray icon, UI) in one egui process. Close the window and your lighting dies with it; on Wayland the window can't even hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). This fork splits the system at its natural seam:
+
+The daemon starts on its own at login. The GUI is only a client, so the daemon does not need it at startup.
 
 ```mermaid
 graph LR
@@ -52,14 +54,14 @@ The daemon owns everything stateful behind one command loop (one thread mutates 
 
 ## Measured, not claimed
 
-Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: L5P-Keyboard-RGB's GUI window, Aurora's daemon.
+Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: L5P-Keyboard-RGB's GUI window, Aurora's daemon. The `10 MiB` headline is the daemon-only footprint. Opening the GUI uses about `61 MiB`, and that process exits when you close it.
 
 | Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | verdict                             |
 | ----------------------- | ------------------------ | -------------------------- | ----------------------------------- |
 | Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | ✅ 8× smaller                       |
 | Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | ✅ 8× smaller                       |
 | Resident CPU, idle      | 0.10%                    | 0.04%                      | ✅ 2.5× lower                       |
-| Resident CPU, Swipe     | 0.52%                    | 0.55–0.97%                 | ⚠️ comparable, more variance        |
+| Resident CPU, Swipe     | 0.52%                    | 0.55% to 0.97%             | ⚠️ comparable, more variance        |
 | Binaries on disk        | 26.6 MB                  | 8.4 MB daemon + 2.5 MB GUI | ✅ 2.4× smaller combined            |
 | GUI while open          | is the resident 82.6 MiB | 61 MiB, exits on close     | ✅ lighter, and transient by design |
 
@@ -101,4 +103,4 @@ $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native swit
 ## Credits
 
 - [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB): the original project. The USB HID driver, the effect implementations and years of device support live on here, GPL-3.0 like this fork.
-- Supported models (2020–2024 Legion / IdeaPad / LOQ) are unchanged from L5P-Keyboard-RGB; see [`driver/src/lib.rs`](driver/src/lib.rs).
+- Supported models (2020 to 2024 Legion / IdeaPad / LOQ) are unchanged from L5P-Keyboard-RGB; see [`driver/src/lib.rs`](driver/src/lib.rs).
