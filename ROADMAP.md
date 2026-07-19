@@ -30,7 +30,7 @@ first-party tool on the desktop they target.
 
 - [ ] GUI polish pass against the GNOME HIG: spacing, typography,
       keyboard preview refinement, accessibility. Issue: #4
-- [ ] Deliberate empty and error states: daemon not running, keyboard
+- [x] Deliberate empty and error states: daemon not running, keyboard
       unplugged, permission missing. Every failure visible and
       recoverable from the UI. Issue: #5
 - [ ] Wayland-native hotkeys via the XDG GlobalShortcuts portal,

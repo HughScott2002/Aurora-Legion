@@ -37,6 +37,13 @@ pub struct App {
     autostart_enabled: bool,
     autostart_managed: bool,
 
+    /// A start-daemon action is in flight; the button shows it and blocks
+    /// double clicks until the daemon connects or the action reports back.
+    daemon_start_pending: bool,
+    /// The keyboard connected at least once this session. Distinguishes
+    /// "unplugged just now" from "never found one" in the banner.
+    keyboard_seen: bool,
+
     /// Toast queued by update(), shown and cleared by update_view().
     pending_toast: Cell<Option<String>>,
 }
@@ -79,6 +86,7 @@ pub struct AppWidgets {
     toast_overlay: adw::ToastOverlay,
     permission_banner: adw::Banner,
     content_stack: gtk::Stack,
+    start_button: gtk::Button,
 
     lighting: lighting::LightingPage,
     profiles: profiles::ProfilesPage,
@@ -116,8 +124,18 @@ impl SimpleComponent for App {
             autostart_available: false,
             autostart_enabled: false,
             autostart_managed: false,
+            daemon_start_pending: false,
+            keyboard_seen: false,
             pending_toast: Cell::new(None),
         };
+
+        // Query systemd availability now, not on first connect: the Start
+        // Daemon button on the disconnected page must know whether to go
+        // through systemctl before the daemon has ever answered.
+        let autostart_sender = sender.clone();
+        daemon_actions::query_autostart(move |msg| {
+            autostart_sender.input(msg);
+        });
 
         // --- Pages --------------------------------------------------------
         let lighting = lighting::build(&sender);
@@ -139,7 +157,10 @@ impl SimpleComponent for App {
         let status_page = adw::StatusPage::new();
         status_page.set_icon_name(Some("keyboard-brightness-symbolic"));
         status_page.set_title("Daemon Not Running");
-        status_page.set_description(Some("The background service that drives the keyboard lighting is not running."));
+        status_page.set_description(Some(
+            "The background service that drives the keyboard lighting is not running. \
+             Start it here, or from a terminal with \u{201c}aurora daemon\u{201d}.",
+        ));
 
         let start_button = gtk::Button::with_label("Start Daemon");
         start_button.add_css_class("suggested-action");
@@ -167,6 +188,11 @@ impl SimpleComponent for App {
 
         let permission_banner = adw::Banner::new("");
         permission_banner.set_revealed(false);
+        // The button is only labeled (and therefore visible) in the
+        // permission-denied state; see update_view.
+        permission_banner.connect_button_clicked(|_| {
+            show_permission_help_dialog();
+        });
 
         let toolbar_view = adw::ToolbarView::new();
         toolbar_view.add_top_bar(&header_bar);
@@ -182,6 +208,7 @@ impl SimpleComponent for App {
             toast_overlay,
             permission_banner,
             content_stack,
+            start_button,
             lighting,
             profiles,
             custom,
@@ -370,6 +397,10 @@ impl SimpleComponent for App {
             }
 
             AppMsg::StartDaemonRequested => {
+                if self.daemon_start_pending {
+                    return;
+                }
+                self.daemon_start_pending = true;
                 let deliver_sender = sender.clone();
                 daemon_actions::start_daemon(self.autostart_available, move |msg| {
                     deliver_sender.input(msg);
@@ -405,6 +436,7 @@ impl SimpleComponent for App {
                 self.autostart_managed = managed;
             }
             AppMsg::ServiceActionFinished { description, error } => {
+                self.daemon_start_pending = false;
                 if let Some(error) = error {
                     self.queue_toast(&format!("{description}: {error}"));
                 }
@@ -425,6 +457,16 @@ impl SimpleComponent for App {
             widgets.content_stack.set_visible_child_name(visible_child);
         }
 
+        // --- Start button while a start attempt runs ----------------------
+        let start_label = if self.daemon_start_pending { "Starting…" } else { "Start Daemon" };
+        if widgets.start_button.label().as_deref() != Some(start_label) {
+            widgets.start_button.set_label(start_label);
+        }
+        let start_sensitive = !self.daemon_start_pending;
+        if widgets.start_button.is_sensitive() != start_sensitive {
+            widgets.start_button.set_sensitive(start_sensitive);
+        }
+
         // --- Toast ---------------------------------------------------------
         if let Some(text) = self.pending_toast.take() {
             widgets.toast_overlay.add_toast(adw::Toast::new(&text));
@@ -435,17 +477,28 @@ impl SimpleComponent for App {
         };
 
         // --- Keyboard status banner ---------------------------------------
+        // The banner is deliberately non-blocking: profile edits still work
+        // without a keyboard and apply when it comes back. The button is
+        // only shown where a user action exists (the udev fix).
         match &state.keyboard {
             KeyboardStatus::PermissionDenied { .. } => {
-                widgets.permission_banner.set_title("Keyboard access denied. Install the udev rule, then replug or reboot");
+                widgets.permission_banner.set_title("Keyboard found, but access is denied");
+                widgets.permission_banner.set_button_label(Some("How to Fix…"));
                 widgets.permission_banner.set_revealed(true);
             }
             KeyboardStatus::Searching => {
-                widgets.permission_banner.set_title("Looking for a supported keyboard…");
+                let title = if self.keyboard_seen {
+                    "Keyboard disconnected. Reconnecting automatically…"
+                } else {
+                    "No supported keyboard found. It is picked up automatically when connected"
+                };
+                widgets.permission_banner.set_title(title);
+                widgets.permission_banner.set_button_label(None);
                 widgets.permission_banner.set_revealed(true);
             }
             KeyboardStatus::Error { message } => {
-                widgets.permission_banner.set_title(&format!("Keyboard error: {message}"));
+                widgets.permission_banner.set_title(&format!("Keyboard error: {message}. Retrying automatically…"));
+                widgets.permission_banner.set_button_label(None);
                 widgets.permission_banner.set_revealed(true);
             }
             KeyboardStatus::Connected => {
@@ -497,6 +550,7 @@ impl App {
         match update {
             IpcUpdate::Connected => {
                 self.connected = true;
+                self.daemon_start_pending = false;
                 let deliver_sender = sender.clone();
                 daemon_actions::query_autostart(move |msg| {
                     deliver_sender.input(msg);
@@ -507,6 +561,18 @@ impl App {
                 self.state = None;
             }
             IpcUpdate::State(state) => {
+                // Toast the recovery transition: the banner already covers
+                // the loss, but its silent disappearance is easy to miss.
+                let was_connected = matches!(self.state.as_ref().map(|old| &old.keyboard), Some(KeyboardStatus::Connected));
+                let now_connected = matches!(state.keyboard, KeyboardStatus::Connected);
+                if now_connected && !was_connected && self.state.is_some() {
+                    let text = if self.keyboard_seen { "Keyboard reconnected" } else { "Keyboard connected" };
+                    self.queue_toast(text);
+                }
+                if now_connected {
+                    self.keyboard_seen = true;
+                }
+
                 self.profile = state.current.clone();
                 self.state = Some(*state);
             }
@@ -711,6 +777,59 @@ fn show_save_profile_dialog(sender: &ComponentSender<App>) {
                 .map(|entry| entry.text().to_string())
                 .unwrap_or_default();
             dialog_sender.input(AppMsg::SaveProfileConfirmed { name });
+        }
+    });
+
+    dialog.present(Some(&window));
+}
+
+/// The udev rule offered by the permission-denied help dialog. Vendor-wide
+/// on purpose: one rule covers every supported model, unlike the
+/// product-specific example in the quick-start guide.
+const UDEV_RULE_TEXT: &str = r#"KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", TAG+="uaccess""#;
+
+const SETUP_GUIDE_URL: &str = "https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access";
+
+fn show_permission_help_dialog() {
+    let Some(window) = relm4::main_application().active_window() else {
+        return;
+    };
+
+    let body = "The keyboard's hidraw device is root-only on most distros. \
+                A udev rule lets your user open it without root.\n\n\
+                On NixOS, enable the flake's hardware module instead. Anywhere else: \
+                save the rule below as /etc/udev/rules.d/99-aurora.rules, run \
+                \u{201c}sudo udevadm control --reload-rules && sudo udevadm trigger\u{201d}, \
+                then replug the keyboard or reboot.";
+
+    let rule_label = gtk::Label::new(Some(UDEV_RULE_TEXT));
+    rule_label.set_selectable(true);
+    rule_label.set_wrap(true);
+    rule_label.add_css_class("monospace");
+    rule_label.set_margin_top(6);
+
+    let dialog = adw::AlertDialog::new(Some("Fix Keyboard Access"), Some(body));
+    dialog.set_extra_child(Some(&rule_label));
+    dialog.add_response("close", "Close");
+    dialog.add_response("copy", "Copy Rule");
+    dialog.add_response("guide", "Open Setup Guide");
+    dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("copy"));
+    dialog.set_close_response("close");
+
+    dialog.connect_response(None, move |_dialog, response| {
+        if response == "copy" {
+            if let Some(display) = gtk::gdk::Display::default() {
+                display.clipboard().set_text(UDEV_RULE_TEXT);
+            }
+        }
+        if response == "guide" {
+            let launcher = gtk::UriLauncher::new(SETUP_GUIDE_URL);
+            launcher.launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
+                if let Err(error) = result {
+                    eprintln!("app: could not open setup guide: {error}");
+                }
+            });
         }
     });
 
