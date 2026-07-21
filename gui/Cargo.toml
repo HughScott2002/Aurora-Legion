@@ -7,9 +7,10 @@ license = "GPL-3.0"
 [dependencies]
 aurora-protocol = { path = "../protocol" }
 
-# gnome_48 targets GTK 4.18 / libadwaita 1.7 — safely below the system
-# libraries (GTK 4.20 / adw 1.8) while covering every widget in use.
-relm4 = { version = "0.11.0", features = ["libadwaita", "gnome_48"] }
+# gnome_46 targets GTK 4.14 / libadwaita 1.5, the Ubuntu 24.04 LTS
+# baseline. The newest APIs in use are ColorDialogButton (GTK 4.10) and
+# adw::AlertDialog (adw 1.5), so nothing is lost by staying this low.
+relm4 = { version = "0.11.0", features = ["libadwaita", "gnome_46"] }
 
 crossbeam-channel = "0.5.15"
 serde_json = "1.0.140"
