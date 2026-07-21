@@ -43,6 +43,11 @@ jobs:
       - name: Build tarball
         run: bash contrib/build-tarball.sh
 
+      # Reuses the cargo build from the tarball step; only the
+      # bundling work is new.
+      - name: Build AppImage
+        run: bash contrib/build-appimage.sh
+
       - name: Extract changelog section
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -61,4 +66,6 @@ jobs:
         with:
           name: Aurora ${{ github.ref_name }}
           body_path: release-notes.md
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/*.AppImage
