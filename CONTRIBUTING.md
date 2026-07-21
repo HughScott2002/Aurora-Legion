@@ -46,11 +46,16 @@ To cut version X.Y.Z:
 2. Update the version fixture strings in `protocol/src/ipc.rs` tests so
    the examples stay honest.
 3. Move the Unreleased entries in `CHANGELOG.md` under a new
-   `## [X.Y.Z] - date` heading and update the link references.
-4. Optionally verify the tarball locally first:
+   `## [X.Y.Z] - date` heading and update the link references. The
+   workflow refuses to release a version whose changelog section is
+   missing or empty.
+4. Once the AppStream metainfo file exists (branding, issue #2), add a
+   matching `<release version="X.Y.Z">` entry to it; the workflow
+   fails without one.
+5. Optionally verify the tarball locally first:
    `docker run --rm -v "$PWD:/src" -w /src ubuntu:24.04 bash contrib/build-tarball.sh`
-5. Commit as `chore(release): vX.Y.Z` and push (the pre-push hook runs
+6. Commit as `chore(release): vX.Y.Z` and push (the pre-push hook runs
    `nix build`).
-6. Tag and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-7. Watch the workflow (`gh run watch`), then download the published
+7. Tag and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+8. Watch the workflow (`gh run watch`), then download the published
    asset and confirm it unpacks and `bin/aurora --help` runs.
