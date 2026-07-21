@@ -1,13 +1,13 @@
 <div align="center">
 
-# Aurora
+# Aurora for Legion
 
-**Lenovo Vantage is not available on Linux, and the usual workaround keeps your keyboard lighting tied to an open window.**
+**No Lenovo Vantage on Linux? The usual alternative must stay running to keep animated effects alive.**
 
-Aurora is a Linux-first fix for the 4-zone RGB keyboard in Lenovo Legion laptops: a native GTK4 app backed by a small resident daemon that restores profiles at login, keeps lighting effects running after the GUI closes, all while barely using any ram.
+Aurora runs them quietly in the background, restores your profile at login, and gives you a polished native app with more ways to control your keyboard.
 
 <p>
-  <a href="#install-nixos--home-manager"><img src="https://img.shields.io/badge/-Install-ff2740?style=for-the-badge" alt="Install" /></a>&nbsp;
+  <a href="#install-on-nixos"><img src="https://img.shields.io/badge/-Install-ff2740?style=for-the-badge" alt="Install" /></a>&nbsp;
   <a href="#cli"><img src="https://img.shields.io/badge/-CLI-37f558?style=for-the-badge" alt="CLI" /></a>&nbsp;
   <a href="#measured-not-claimed"><img src="https://img.shields.io/badge/-Measurements-3584e4?style=for-the-badge" alt="Measurements" /></a>&nbsp;
   <a href="https://github.com/HughScott2002/Aurora-Legion/discussions"><img src="https://img.shields.io/badge/-Discussions-e01b96?style=for-the-badge" alt="Discussions" /></a>
@@ -18,23 +18,24 @@ Aurora is a Linux-first fix for the 4-zone RGB keyboard in Lenovo Legion laptops
   <img src="https://img.shields.io/badge/GTK4-libadwaita-4A86CF?logo=gnome&logoColor=white" alt="GTK4 + libadwaita" />
   <img src="https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos&logoColor=white" alt="Nix flake" />
   <img src="https://img.shields.io/badge/systemd-user_service-2d2d2d" alt="systemd user service" />
-  <img src="https://img.shields.io/badge/resident_daemon_memory-10_MiB-37f558" alt="Resident daemon memory 10 MiB" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0" />
 </p>
 
 </div>
 
-<!-- ## Demo -->
-
-<!-- Add phone demo here: change colors, close the GUI, lighting stays on, reopen the GUI, change again. -->
+<!-- Add phone demo here: start an animated effect, close the GUI, show it continuing, reopen the GUI, then change it again. -->
 
 <div align="center">
   <img src="docs/screenshot.png" alt="aurora GTK4 interface" width="560"/>
 </div>
 
-Open the GUI, set a profile, close the window, and the lighting stays on. Reopen the GUI or use the CLI and the daemon is still there, holding the live state.
+Set an animated effect, close the window, and keep the animation. Open Aurora later to change it again.
 
-## Install (NixOS + home-manager)
+## Install on NixOS
+
+NixOS and Home Manager are supported today. Packages for other Linux distributions are planned.
+
+Aurora supports 4-zone RGB keyboards across select 2020 to 2024 Legion, IdeaPad, and LOQ laptops. Check [`driver/src/lib.rs`](driver/src/lib.rs) for exact USB IDs.
 
 ```nix
 # flake inputs
@@ -49,29 +50,40 @@ imports = [ aurora.nixosModules.default ];
 hardware.aurora.enable = true;
 ```
 
-Or just try it: `nix run github:HughScott2002/Aurora-Legion` (GUI); run `nix run github:HughScott2002/Aurora-Legion#daemon` first if the service isn't running. Building from a clone: [docs/quick-start.md](docs/quick-start.md).
+To try it without installing, start the daemon and then the GUI:
+
+```console
+$ nix run github:HughScott2002/Aurora-Legion#daemon &
+$ nix run github:HughScott2002/Aurora-Legion
+```
+
+For keyboard permissions or building from a clone, see the [quick start](docs/quick-start.md).
 
 ## Why Aurora
 
-Lenovo's software does not exist on Linux. [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB) made Linux keyboard control possible with its reverse-engineered driver and effect engine, but it still ships driver, effect threads, tray icon, and UI in one egui process.
+Lenovo Vantage does not run on Linux. [L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB) made control possible through its reverse-engineered driver and effect engine, but its UI, tray, and software effects share one process.
 
-Close that window and your lighting dies with it. On Wayland the window cannot even hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). Aurora keeps the hardware work, then rebuilds the user-facing architecture around a persistent daemon and native Linux clients.
+On Wayland, that process cannot hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). Close it and animated effects stop.
 
-|                   | L5P-Keyboard-RGB                        | Aurora                                                  |
-| ----------------- | --------------------------------------- | ------------------------------------------------------- |
-| Lighting lifetime | ❌ dies with the window                 | ✅ daemon survives login to logout                      |
-| Startup           | ❌ launch it yourself                   | ✅ systemd user service, profile restored at login      |
-| UI                | ❌ egui, fixed 500×460 window           | ✅ native GTK4/libadwaita, GNOME HIG                    |
-| CLI               | ❌ one-shot, hardware effects only      | ✅ talks to the daemon, so effects persist              |
-| Scripting         | ❌ none                                 | ✅ JSON IPC socket, CLI, systemd + home-manager modules |
-| Settings          | ❌ `./settings.json` in the working dir | ✅ XDG config, atomic writes, migrates old files        |
-| Keyboard unplug   | ❌ panics an effect thread              | ✅ detected, reacquired with backoff, shown in the UI   |
+Aurora preserves the hardware work while moving profiles and effects into a persistent daemon.
+
+| Capability        | L5P-Keyboard-RGB                         | Aurora                                                |
+| ----------------- | ---------------------------------------- | ----------------------------------------------------- |
+| Lighting lifetime | Animated effects need the app process    | Animated effects continue after the GUI closes       |
+| Startup           | Started manually                         | systemd user service, profile restored at login      |
+| UI                | egui, fixed 500×460 window               | Native GTK4/libadwaita, GNOME HIG                    |
+| CLI               | Separate one-shot process                | Talks to shared daemon state                         |
+| Integration       | CLI and custom-effect JSON               | CLI, JSON IPC, systemd, and Home Manager modules     |
+| Settings          | `./settings.json` in the working dir     | XDG config, atomic writes, migrates old files        |
+| Keyboard unplug   | Can panic an effect thread               | Detected, reacquired with backoff, shown in the UI   |
 
 ## Measured, not claimed
 
-Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: L5P-Keyboard-RGB's GUI window, Aurora's daemon. The `10 MiB` headline is the daemon-only footprint. Opening the GUI uses about `61 MiB`, and that process exits when you close it.
+Same machine, same Nix pipeline, release builds. PSS and CPU were sampled twice over 60-second windows. [See the methodology and raw data](docs/measurements.md).
 
-| Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | verdict                             |
+"Resident" compares each project's long-running control process: L5P-Keyboard-RGB's GUI and Aurora's daemon. Aurora's GUI uses about `61 MiB` only while open.
+
+| Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | Verdict                             |
 | ----------------------- | ------------------------ | -------------------------- | ----------------------------------- |
 | Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | ✅ 8× smaller                       |
 | Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | ✅ 8× smaller                       |
@@ -92,7 +104,9 @@ graph LR
     SD["systemd --user"] -. "starts at login" .-> D
 ```
 
-The daemon owns everything stateful behind one command loop (one thread mutates state, everything else sends messages), channels and queues are bounded, and no driver call can panic the engine. Written [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
+The daemon owns state behind one command loop: one thread mutates state and everything else sends messages. Channels and queues are bounded, and driver failures cannot panic the engine.
+
+The code follows [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
 
 ## CLI
 
@@ -110,9 +124,12 @@ $ aurora cycle-profile   # bind this to a GNOME shortcut for Wayland-native swit
 
 ## Community
 
-[Discussions are open](https://github.com/HughScott2002/Aurora-Legion/discussions); questions, ideas and show-and-tell all welcome. PRs too, especially new frontends: the [`protocol`](protocol/) crate is the seam (JSON over a unix socket), so a TUI, KDE or web client needs zero daemon changes. Start with [CONTRIBUTING.md](CONTRIBUTING.md); the code rules live in [docs/style-guide.md](docs/style-guide.md).
+Questions, ideas, and show-and-tell are welcome in [Discussions](https://github.com/HughScott2002/Aurora-Legion/discussions). Pull requests are welcome too.
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md); code rules live in [docs/style-guide.md](docs/style-guide.md).
+
+New frontends connect through the [`protocol`](protocol/) crate over JSON on a Unix socket. A TUI, KDE, or web client can be added without changing the daemon.
 
 ## Credits
 
-- [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB): the original project. The USB HID driver, the effect implementations and years of device support live on here, GPL-3.0 like this fork.
-- Supported models (2020 to 2024 Legion / IdeaPad / LOQ) are unchanged from L5P-Keyboard-RGB; see [`driver/src/lib.rs`](driver/src/lib.rs).
+- Aurora builds on [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB). Its reverse-engineered USB HID driver, effects, and years of device support made this rearchitecture possible. Both projects are GPL-3.0.
