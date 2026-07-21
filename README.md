@@ -2,7 +2,7 @@
 
 # Aurora for Legion
 
-**No Lenovo Vantage on Linux? The usual alternative must stay running to keep animated effects alive.**
+**No Lenovo Vantage on Linux? The usual alternative keeps a window running to keep animated effects alive.**
 
 Aurora runs them quietly in the background, restores your profile at login, and gives you a polished native app with more ways to control your keyboard.
 
@@ -67,15 +67,15 @@ On Wayland, that process cannot hide to the tray ([#181](https://github.com/4JX/
 
 Aurora preserves the hardware work while moving profiles and effects into a persistent daemon.
 
-| Capability        | L5P-Keyboard-RGB                         | Aurora                                                |
-| ----------------- | ---------------------------------------- | ----------------------------------------------------- |
-| Lighting lifetime | Animated effects need the app process    | Animated effects continue after the GUI closes       |
-| Startup           | Started manually                         | systemd user service, profile restored at login      |
-| UI                | egui, fixed 500×460 window               | Native GTK4/libadwaita, GNOME HIG                    |
-| CLI               | Separate one-shot process                | Talks to shared daemon state                         |
-| Integration       | CLI and custom-effect JSON               | CLI, JSON IPC, systemd, and Home Manager modules     |
-| Settings          | `./settings.json` in the working dir     | XDG config, atomic writes, migrates old files        |
-| Keyboard unplug   | Can panic an effect thread               | Detected, reacquired with backoff, shown in the UI   |
+| Capability        | L5P-Keyboard-RGB                      | Aurora                                             |
+| ----------------- | ------------------------------------- | -------------------------------------------------- |
+| Lighting lifetime | Animated effects need the app process | Animated effects continue after the GUI closes     |
+| Startup           | Started manually                      | systemd user service, profile restored at login    |
+| UI                | egui, fixed 500×460 window            | Native GTK4/libadwaita, GNOME HIG                  |
+| CLI               | Separate one-shot process             | Talks to shared daemon state                       |
+| Integration       | CLI and custom-effect JSON            | CLI, JSON IPC, systemd, and Home Manager modules   |
+| Settings          | `./settings.json` in the working dir  | XDG config, atomic writes, migrates old files      |
+| Keyboard unplug   | Can panic an effect thread            | Detected, reacquired with backoff, shown in the UI |
 
 ## Measured, not claimed
 
