@@ -40,6 +40,31 @@ jobs:
             exit 1
           fi
 
+      - name: Check changelog has a section for this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no ## [$version] section; add one before tagging" >&2
+            exit 1
+          fi
+
+      # The AppStream metainfo file arrives with the branding work
+      # (issue #2). Once it exists, every release must list itself in
+      # the <releases> section, because that is what GNOME Software
+      # shows as release notes.
+      - name: Check metainfo lists this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          metainfo="gui/data/io.github.HughScott2002.Aurora.metainfo.xml"
+          if [ ! -f "$metainfo" ]; then
+            echo "no metainfo file yet; skipping (expected until branding lands)"
+            exit 0
+          fi
+          if ! grep -q "<release version=\"$version\"" "$metainfo"; then
+            echo "$metainfo has no <release version=\"$version\"> entry; add one before tagging" >&2
+            exit 1
+          fi
+
       - name: Build tarball
         run: bash contrib/build-tarball.sh
 
@@ -58,7 +83,8 @@ jobs:
             found { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
-            echo "CHANGELOG.md has no section for $version" > release-notes.md
+            echo "the ## [$version] section in CHANGELOG.md is empty" >&2
+            exit 1
           fi
 
       - name: Publish release
