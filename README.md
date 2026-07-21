@@ -81,7 +81,7 @@ Aurora preserves the hardware work while moving profiles and effects into a pers
 
 Same machine, same Nix pipeline, release builds. PSS and CPU were sampled twice over 60-second windows. [See the methodology and raw data](docs/measurements.md).
 
-"Resident" compares each project's long-running control process: L5P-Keyboard-RGB's GUI and Aurora's daemon. Aurora's GUI uses about `61 MiB` only while open.
+"Resident" compares each project's long-running control process: L5P-Keyboard-RGB's GUI and Aurora's daemon. Aurora's GUI uses about `61 MiB` but only while open.
 
 | Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | Verdict                             |
 | ----------------------- | ------------------------ | -------------------------- | ----------------------------------- |
