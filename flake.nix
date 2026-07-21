@@ -85,26 +85,6 @@
           { config, lib, ... }:
           let
             cfg = config.hardware.aurora;
-
-            # (vendor, product) pairs of every supported keyboard controller,
-            # mirroring KNOWN_DEVICE_INFOS in driver/src/lib.rs.
-            productIds = [
-              "c955" # 2020
-              "c963" # 2021 Ideapad
-              "c965" # 2021
-              "c973" # 2022 Ideapad
-              "c975" # 2022
-              "c983" # 2023 LOQ
-              "c984" # 2023
-              "c985" # 2023 Pro
-              "c993" # 2024 LOQ
-              "c994" # 2024
-              "c995" # 2024 Pro
-            ];
-
-            ruleForProduct = productId: ''
-              KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="${productId}", TAG+="uaccess"
-            '';
           in
           {
             options.hardware.aurora = {
@@ -112,7 +92,9 @@
             };
 
             config = lib.mkIf cfg.enable {
-              services.udev.extraRules = lib.concatStrings (map ruleForProduct productIds);
+              # One rule per supported keyboard controller; the file also
+              # serves non-Nix installs (tarball, manual copy).
+              services.udev.extraRules = builtins.readFile ./udev/99-aurora.rules;
             };
           };
       };

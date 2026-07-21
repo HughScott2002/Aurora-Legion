@@ -1,0 +1,34 @@
+# Aurora keyboard access rules.
+#
+# Lets the logged-in (seat) user open the keyboard's hidraw device
+# without root. One rule per supported keyboard controller, mirroring
+# KNOWN_DEVICE_INFOS in driver/src/lib.rs. The NixOS module in flake.nix
+# reads this file verbatim.
+#
+# Manual install:
+#   sudo install -Dm644 99-aurora.rules /etc/udev/rules.d/99-aurora.rules
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# then replug the keyboard (or reboot).
+
+# 2020
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c955", TAG+="uaccess"
+# 2021 Ideapad
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c963", TAG+="uaccess"
+# 2021
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c965", TAG+="uaccess"
+# 2022 Ideapad
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c973", TAG+="uaccess"
+# 2022
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c975", TAG+="uaccess"
+# 2023 LOQ
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c983", TAG+="uaccess"
+# 2023
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c984", TAG+="uaccess"
+# 2023 Pro
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c985", TAG+="uaccess"
+# 2024 LOQ
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c993", TAG+="uaccess"
+# 2024
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c994", TAG+="uaccess"
+# 2024 Pro
+KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c995", TAG+="uaccess"
