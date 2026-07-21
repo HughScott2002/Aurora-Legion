@@ -11,6 +11,9 @@ target
 .direnv
 result
 
+# Release tarballs
+dist
+
 # Other
 things.md
 *.json
