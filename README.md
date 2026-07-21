@@ -2,9 +2,9 @@
 
 # Aurora
 
-**A minimal daemon + native GTK4 app for the 4-zone RGB keyboard in Lenovo Legion laptops.**
+**Lenovo Vantage is not available on Linux, and the usual workaround keeps your keyboard lighting tied to an open window.**
 
-A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB), whose reverse-engineered driver and effect engine make this project possible.
+Aurora is a Linux-first fix for the 4-zone RGB keyboard in Lenovo Legion laptops: a native GTK4 app backed by a small resident daemon that restores profiles at login, keeps lighting effects running after the GUI closes, all while barely using any ram.
 
 <p>
   <a href="#install-nixos--home-manager"><img src="https://img.shields.io/badge/-Install-ff2740?style=for-the-badge" alt="Install" /></a>&nbsp;
@@ -22,48 +22,17 @@ A ground-up rearchitecture of [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0" />
 </p>
 
-<img src="docs/screenshot.png" alt="aurora GTK4 interface" width="560"/>
-
 </div>
 
-## Why a rearchitecture
+<!-- ## Demo -->
 
-The original ships everything (driver, effect threads, tray icon, UI) in one egui process. Close the window and your lighting dies with it; on Wayland the window can't even hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). This fork splits the system at its natural seam:
+<!-- Add phone demo here: change colors, close the GUI, lighting stays on, reopen the GUI, change again. -->
 
-The daemon starts on its own at login. The GUI is only a client, so the daemon does not need it at startup.
+<div align="center">
+  <img src="docs/screenshot.png" alt="aurora GTK4 interface" width="560"/>
+</div>
 
-```mermaid
-graph LR
-    GUI["aurora-gui<br/>GTK4 + libadwaita"] -- "JSON over<br/>unix socket" --> D
-    CLI["aurora<br/>set · status · cycle-profile"] -- "same socket" --> D
-    D["aurora daemon<br/>effect engine · profiles · settings"] -- hidapi --> KB[("4-zone<br/>keyboard")]
-    SD["systemd --user"] -. "starts at login" .-> D
-```
-
-|                   | L5P-Keyboard-RGB                        | Aurora                                               |
-| ----------------- | --------------------------------------- | ------------------------------------------------------- |
-| Lighting lifetime | ❌ dies with the window                 | ✅ daemon survives login to logout                      |
-| Startup           | ❌ launch it yourself                   | ✅ systemd user service, profile restored at login      |
-| UI                | ❌ egui, fixed 500×460 window           | ✅ native GTK4/libadwaita, GNOME HIG                    |
-| CLI               | ❌ one-shot, hardware effects only      | ✅ talks to the daemon, so effects persist              |
-| Scripting         | ❌ none                                 | ✅ JSON IPC socket, CLI, systemd + home-manager modules |
-| Settings          | ❌ `./settings.json` in the working dir | ✅ XDG config, atomic writes, migrates old files        |
-| Keyboard unplug   | ❌ panics an effect thread              | ✅ detected, reacquired with backoff, shown in the UI   |
-
-The daemon owns everything stateful behind one command loop (one thread mutates state, everything else sends messages), channels and queues are bounded, and no driver call can panic the engine. Written [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
-
-## Measured, not claimed
-
-Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: L5P-Keyboard-RGB's GUI window, Aurora's daemon. The `10 MiB` headline is the daemon-only footprint. Opening the GUI uses about `61 MiB`, and that process exits when you close it.
-
-| Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | verdict                             |
-| ----------------------- | ------------------------ | -------------------------- | ----------------------------------- |
-| Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | ✅ 8× smaller                       |
-| Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | ✅ 8× smaller                       |
-| Resident CPU, idle      | 0.10%                    | 0.04%                      | ✅ 2.5× lower                       |
-| Resident CPU, Swipe     | 0.52%                    | 0.55% to 0.97%             | ⚠️ comparable, more variance        |
-| Binaries on disk        | 26.6 MB                  | 8.4 MB daemon + 2.5 MB GUI | ✅ 2.4× smaller combined            |
-| GUI while open          | is the resident 82.6 MiB | 61 MiB, exits on close     | ✅ lighter, and transient by design |
+Open the GUI, set a profile, close the window, and the lighting stays on. Reopen the GUI or use the CLI and the daemon is still there, holding the live state.
 
 ## Install (NixOS + home-manager)
 
@@ -81,6 +50,49 @@ hardware.aurora.enable = true;
 ```
 
 Or just try it: `nix run github:HughScott2002/Aurora-Legion` (GUI); run `nix run github:HughScott2002/Aurora-Legion#daemon` first if the service isn't running. Building from a clone: [docs/quick-start.md](docs/quick-start.md).
+
+## Why Aurora
+
+Lenovo's software does not exist on Linux. [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB) made Linux keyboard control possible with its reverse-engineered driver and effect engine, but it still ships driver, effect threads, tray icon, and UI in one egui process.
+
+Close that window and your lighting dies with it. On Wayland the window cannot even hide to the tray ([#181](https://github.com/4JX/L5P-Keyboard-RGB/issues/181)). Aurora keeps the hardware work, then rebuilds the user-facing architecture around a persistent daemon and native Linux clients.
+
+|                   | L5P-Keyboard-RGB                        | Aurora                                                  |
+| ----------------- | --------------------------------------- | ------------------------------------------------------- |
+| Lighting lifetime | ❌ dies with the window                 | ✅ daemon survives login to logout                      |
+| Startup           | ❌ launch it yourself                   | ✅ systemd user service, profile restored at login      |
+| UI                | ❌ egui, fixed 500×460 window           | ✅ native GTK4/libadwaita, GNOME HIG                    |
+| CLI               | ❌ one-shot, hardware effects only      | ✅ talks to the daemon, so effects persist              |
+| Scripting         | ❌ none                                 | ✅ JSON IPC socket, CLI, systemd + home-manager modules |
+| Settings          | ❌ `./settings.json` in the working dir | ✅ XDG config, atomic writes, migrates old files        |
+| Keyboard unplug   | ❌ panics an effect thread              | ✅ detected, reacquired with backoff, shown in the UI   |
+
+## Measured, not claimed
+
+Same machine, same nix pipeline, release builds. PSS and CPU sampled over 60 s windows, two passes; [methodology and raw numbers here](docs/measurements.md). "Resident" means the process that must run for the lights to work at all: L5P-Keyboard-RGB's GUI window, Aurora's daemon. The `10 MiB` headline is the daemon-only footprint. Opening the GUI uses about `61 MiB`, and that process exits when you close it.
+
+| Metric                  | L5P-Keyboard-RGB 0.20.8  | Aurora                     | verdict                             |
+| ----------------------- | ------------------------ | -------------------------- | ----------------------------------- |
+| Resident memory, Static | 82.6 MiB                 | 10.2 MiB                   | ✅ 8× smaller                       |
+| Resident memory, Swipe  | 82.3 MiB                 | 10.8 MiB                   | ✅ 8× smaller                       |
+| Resident CPU, idle      | 0.10%                    | 0.04%                      | ✅ 2.5× lower                       |
+| Resident CPU, Swipe     | 0.52%                    | 0.55% to 0.97%             | ⚠️ comparable, more variance        |
+| Binaries on disk        | 26.6 MB                  | 8.4 MB daemon + 2.5 MB GUI | ✅ 2.4× smaller combined            |
+| GUI while open          | is the resident 82.6 MiB | 61 MiB, exits on close     | ✅ lighter, and transient by design |
+
+## How it works
+
+The daemon starts on its own at login. The GUI and CLI are clients, not the resident process.
+
+```mermaid
+graph LR
+    GUI["aurora-gui<br/>GTK4 + libadwaita"] -- "JSON over<br/>unix socket" --> D
+    CLI["aurora<br/>set · status · cycle-profile"] -- "same socket" --> D
+    D["aurora daemon<br/>effect engine · profiles · settings"] -- hidapi --> KB[("4-zone<br/>keyboard")]
+    SD["systemd --user"] -. "starts at login" .-> D
+```
+
+The daemon owns everything stateful behind one command loop (one thread mutates state, everything else sends messages), channels and queues are bounded, and no driver call can panic the engine. Written [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted to Rust.
 
 ## CLI
 
