@@ -49,6 +49,7 @@ jobs:
           awk -v ver="$version" '
             $0 ~ "^## \\[" ver "\\]" { found = 1; next }
             found && /^## \[/ { exit }
+            found && /^\[/ { exit }
             found { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
