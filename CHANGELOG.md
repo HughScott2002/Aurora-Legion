@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- AppImage release artifact: one bundled file that starts the daemon
+  if needed and opens the GUI, or acts as the CLI when given
+  arguments.
+- Assistant install guide (`docs/install-with-ai.md`); the README
+  prompt is now a single line linking to it.
+
 ## [0.21.0] - 2026-07-21
 
 First tagged release. Everything below is the state of the project at

@@ -41,6 +41,20 @@ first (`systemctl --user stop aurora`).
 
 ## Without nix
 
+### AppImage
+
+The lowest-effort path on x86_64 distros from 2024 onward (glibc 2.39
+or newer): download the latest
+`Aurora-<version>-x86_64.AppImage` from the
+[releases page](https://github.com/HughScott2002/Aurora-Legion/releases),
+`chmod +x` it, and run it. GTK, libadwaita, and the other libraries are
+bundled. With no arguments it starts the daemon (if none is running)
+and opens the GUI; with arguments it acts as the CLI, so
+`./Aurora-<version>-x86_64.AppImage status` works. You still need
+[Keyboard access](#keyboard-access) below, and for the daemon to start
+at login use the tarball install or a user unit whose `ExecStart`
+points at the AppImage with the `daemon` argument.
+
 ### Prebuilt tarball
 
 The fastest path on any recent x86_64 distro (glibc 2.39 or newer,

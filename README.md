@@ -61,61 +61,15 @@ For keyboard permissions or building from a clone, see the [quick start](docs/qu
 
 ## Install on other Linux
 
-Download the latest `aurora-<version>-x86_64-linux-gnu.tar.gz` from the [releases page](https://github.com/HughScott2002/Aurora-Legion/releases), unpack it, and run `./install.sh`. It needs GTK 4.14 and libadwaita 1.5 or newer, so Ubuntu 24.04, Debian 13, Fedora 40+, and Arch all work. To build from source instead, follow the [Without nix guide](docs/quick-start.md#without-nix).
+The easiest path is the AppImage: download the latest `Aurora-<version>-x86_64.AppImage` from the [releases page](https://github.com/HughScott2002/Aurora-Legion/releases), make it executable, and run it. One file with GTK and the other libraries bundled; it starts the daemon if needed and opens the GUI. It runs on distros from 2024 onward (glibc 2.39+). The keyboard itself needs a one-time [udev rule](docs/quick-start.md#keyboard-access).
 
-<details>
-<summary><strong>Install with an AI assistant</strong> (paste this into Claude Code or any coding agent)</summary>
+Or paste this into Claude Code or any coding agent and let it handle everything:
 
 ```text
-Install Aurora (https://github.com/HughScott2002/Aurora-Legion) on this
-machine and verify it works. Aurora is a keyboard RGB daemon, CLI, and
-GTK4 app for Lenovo Legion, IdeaPad, and LOQ laptops with 4-zone RGB
-keyboards.
-
-Ground rules: ask me before running anything with sudo. Sudo is only
-needed for distro packages and one udev rule. Outside my home
-directory, only /etc/udev/rules.d/99-aurora.rules may be created.
-
-1. Detect the environment: distro and version from /etc/os-release,
-   architecture from uname -m (must be x86_64), and the keyboard from
-   lsusb. The vendor id is 048d; supported product ids are c955 c963
-   c965 c973 c975 c983 c984 c985 c993 c994 c995. If lsusb shows an
-   048d device with a different product id, stop and help me open an
-   "unsupported keyboard" issue on the repo with the lsusb line.
-
-2. Pick an install path:
-   - NixOS: follow the "Install on NixOS" section of the repo README
-     instead of the steps below.
-   - glibc 2.39+ and GTK 4.14+ available: download the latest
-     aurora-*-x86_64-linux-gnu.tar.gz from the repo's GitHub releases,
-     install the runtime packages listed in its README.txt for my
-     distro, then run its install.sh (it installs into ~/.local and
-     ~/.config/systemd/user, and asks about the udev rule).
-   - Otherwise: build from source following the "Without nix" section
-     of docs/quick-start.md in the repo.
-
-3. Verify: after the udev rule is installed and the keyboard replugged,
-   aurora status must report the daemon running and the keyboard
-   connected. Launch aurora-gui and confirm the window opens.
-
-4. If verification fails, debug in this order:
-   - Keyboard "permission denied" or not connected: confirm
-     /etc/udev/rules.d/99-aurora.rules exists, run
-     sudo udevadm control --reload-rules && sudo udevadm trigger,
-     replug the keyboard, and check the hidraw ACLs with getfacl.
-   - Daemon not running: systemctl --user status aurora and
-     journalctl --user -u aurora -e; the unit binds to
-     graphical-session.target, so confirm that target is active. As a
-     last resort run aurora daemon in the foreground and read stderr.
-   - GUI fails to start: check for missing libraries with
-     ldd ~/.local/bin/aurora-gui | grep "not found" and install the
-     matching packages.
-
-5. When done, summarize what was installed and where, and how to
-   uninstall it (the file list is in the tarball's README.txt).
+Install Aurora on this machine by following https://raw.githubusercontent.com/HughScott2002/Aurora-Legion/main/docs/install-with-ai.md
 ```
 
-</details>
+For a permanent native install there is a prebuilt tarball with an installer script, plus a verified source build path; both are in the [Without nix guide](docs/quick-start.md#without-nix).
 
 ## Why Aurora
 

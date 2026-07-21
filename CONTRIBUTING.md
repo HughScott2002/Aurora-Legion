@@ -34,9 +34,10 @@ libadwaita in the GUI.
 ## Releases
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds
-the prebuilt tarball in an Ubuntu 24.04 container (the same
-`contrib/build-tarball.sh` you can run locally in docker) and publishes
-a GitHub Release with the matching `CHANGELOG.md` section as its notes.
+the prebuilt tarball and the AppImage in an Ubuntu 24.04 container (the
+same `contrib/build-tarball.sh` and `contrib/build-appimage.sh` you can
+run locally in docker) and publishes a GitHub Release with the matching
+`CHANGELOG.md` section as its notes.
 
 To cut version X.Y.Z:
 
