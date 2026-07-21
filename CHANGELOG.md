@@ -6,11 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-07-21
+
 ### Added
 
 - AppImage release artifact: one bundled file that starts the daemon
   if needed and opens the GUI, or acts as the CLI when given
-  arguments.
+  arguments. Runs on x86_64 distros with glibc 2.39 or newer, no
+  packages required.
 - Assistant install guide (`docs/install-with-ai.md`); the README
   prompt is now a single line linking to it.
 
@@ -37,5 +40,6 @@ the point versioning started.
   IdeaPad, and LOQ laptops, via the driver from
   [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB).
 
-[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/HughScott2002/Aurora-Legion/releases/tag/v0.21.0

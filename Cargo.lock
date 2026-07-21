@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "aurora"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "aurora-protocol",
  "clap 4.5.54",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "aurora-gui"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "aurora-protocol",
  "crossbeam-channel",
