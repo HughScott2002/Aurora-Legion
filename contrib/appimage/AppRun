@@ -1,0 +1,31 @@
+#!/bin/bash
+# AppRun for the Aurora AppImage.
+#
+# No arguments: make sure a daemon is running (start the bundled one if
+# not), then open the GUI. Effects keep running after the window closes
+# because they live in the daemon.
+#
+# With arguments: behave as the aurora CLI, so
+# `./Aurora-x86_64.AppImage status` works.
+
+set -u
+
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+# Bundled GTK needs the bundled compiled gsettings schemas; appending
+# our share dir also lets the icon theme lookup find the app icon.
+export GSETTINGS_SCHEMA_DIR="$HERE/usr/share/glib-2.0/schemas${GSETTINGS_SCHEMA_DIR:+:$GSETTINGS_SCHEMA_DIR}"
+export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}:$HERE/usr/share"
+
+if [ "$#" -gt 0 ]; then
+  exec "$HERE/usr/bin/aurora" "$@"
+fi
+
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ ! -S "$runtime_dir/aurora.sock" ]; then
+  log_dir="${XDG_CACHE_HOME:-$HOME/.cache}/aurora"
+  mkdir -p "$log_dir"
+  setsid "$HERE/usr/bin/aurora" daemon >"$log_dir/appimage-daemon.log" 2>&1 &
+fi
+
+exec "$HERE/usr/bin/aurora-gui"
