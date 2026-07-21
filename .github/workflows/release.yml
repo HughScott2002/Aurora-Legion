@@ -1,0 +1,63 @@
+# Builds the prebuilt tarball and publishes a GitHub Release when a
+# version tag is pushed.
+#
+# This is the one CI exception to the repo's no-CI rule: it builds an
+# artifact, it does not gate changes. The gate stays the pre-push hook
+# (nix build). The build itself is contrib/build-tarball.sh, the same
+# script you can run locally in docker before tagging.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  tarball:
+    runs-on: ubuntu-latest
+    # Ubuntu 24.04 is the oldest supported baseline; building in this
+    # container keeps the binaries compatible with it.
+    container: ubuntu:24.04
+    steps:
+      - name: Install checkout prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check tag matches the crate version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          crate_version=$(grep -m1 '^version' daemon/Cargo.toml | cut -d '"' -f 2)
+          if [ "$tag_version" != "$crate_version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match daemon/Cargo.toml version $crate_version" >&2
+            exit 1
+          fi
+
+      - name: Build tarball
+        run: bash contrib/build-tarball.sh
+
+      - name: Extract changelog section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "CHANGELOG.md has no section for $version" > release-notes.md
+          fi
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          name: Aurora ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: dist/*.tar.gz
