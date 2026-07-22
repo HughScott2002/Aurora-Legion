@@ -2,8 +2,6 @@
 
 <div align="center">
 
-# Aurora for Legion
-
 **No Lenovo Vantage on Linux? The usual alternative keeps a window running to keep animated effects alive.**
 
 Aurora runs them quietly in the background, restores your profile at login, and gives you a polished native app with more ways to control your keyboard.
