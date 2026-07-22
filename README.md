@@ -1,6 +1,6 @@
-<div align="center">
+<img width="1280" height="320" alt="Aurora Banner" src="https://github.com/user-attachments/assets/f2dd9300-f61f-4b41-a90d-e72f303c815b" />
 
-# Aurora for Legion
+<div align="center">
 
 **No Lenovo Vantage on Linux? The usual alternative keeps a window running to keep animated effects alive.**
 
@@ -69,7 +69,7 @@ Or paste this into Claude Code or any coding agent and let it handle everything:
 Install Aurora on this machine by following https://raw.githubusercontent.com/HughScott2002/Aurora-Legion/main/docs/install-with-ai.md
 ```
 
-For a permanent native install there is a prebuilt tarball with an installer script, plus a verified source build path; both are in the [Without nix guide](docs/quick-start.md#without-nix).
+For a permanent native install, there is a prebuilt tarball with an installer script, plus a verified source build path; both are in the [Without nix guide](docs/quick-start.md#without-nix).
 
 ## Why Aurora
 
