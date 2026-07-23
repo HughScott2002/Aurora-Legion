@@ -161,7 +161,7 @@ fn run_status() -> ExitCode {
         aurora_protocol::ipc::KeyboardStatus::Searching => println!("keyboard: searching..."),
         aurora_protocol::ipc::KeyboardStatus::PermissionDenied { message } => {
             println!("keyboard: permission denied ({message})");
-            println!("          install the udev rule: https://github.com/4JX/L5P-Keyboard-RGB#usage");
+            println!("          install the udev rule: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access");
         }
         aurora_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
     }
