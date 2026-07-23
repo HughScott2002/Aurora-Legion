@@ -25,7 +25,7 @@ body:
         Most Linux installations restrict the permissions required for this
         application to access the keyboard by default. Please ensure you have
         [configured the necessary
-        permissions](https://github.com/4JX/L5P-Keyboard-RGB?tab=readme-ov-file#usage).
+        permissions](https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access).
         Alternatively, you can run the application with `sudo`, but this is not
         recommended.
 
