@@ -6,6 +6,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `services.aurora.enable` in the NixOS module: a full install without
+  home-manager — package, udev rules, and the daemon as a systemd user
+  service bound to the graphical session (#11). `hardware.aurora.enable`
+  stays as the udev-only knob for home-manager setups.
+
 ## [0.22.0] - 2026-07-21
 
 ### Added

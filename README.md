@@ -37,10 +37,26 @@ NixOS and Home Manager get first-class modules. On any other distro, see [Instal
 
 Aurora supports 4-zone RGB keyboards across select 2020 to 2024 Legion, IdeaPad, and LOQ laptops. Check [`driver/src/lib.rs`](driver/src/lib.rs) for exact USB IDs.
 
+Add the flake input, then pick one of the two setups:
+
 ```nix
 # flake inputs
 aurora.url = "github:HughScott2002/Aurora-Legion";
+```
 
+**Without home-manager** — one option installs the package, the udev
+rules, and the daemon as a systemd user service:
+
+```nix
+# nixos configuration
+imports = [ aurora.nixosModules.default ];
+services.aurora.enable = true;
+```
+
+**With home-manager** — run the daemon per-user; the NixOS side only
+grants keyboard access:
+
+```nix
 # home-manager: run the daemon at login
 imports = [ aurora.homeModules.default ];
 services.aurora.enable = true;

@@ -79,23 +79,67 @@
             };
           };
 
-        # System-level piece: the udev rule that lets the logged-in user
-        # open the keyboard's hidraw device without root.
+        # System-level pieces. Two knobs:
+        #   hardware.aurora.enable — just the udev rule (pair it with the
+        #     home-manager module above, which runs the daemon).
+        #   services.aurora.enable — full install without home-manager:
+        #     package, udev rule, and the daemon as a systemd user service.
         nixosModules.default =
-          { config, lib, ... }:
+          {
+            config,
+            lib,
+            pkgs,
+            ...
+          }:
           let
-            cfg = config.hardware.aurora;
+            hwCfg = config.hardware.aurora;
+            svcCfg = config.services.aurora;
           in
           {
             options.hardware.aurora = {
               enable = lib.mkEnableOption "udev rules granting seat users access to the Legion RGB keyboard";
             };
 
-            config = lib.mkIf cfg.enable {
-              # One rule per supported keyboard controller; the file also
-              # serves non-Nix installs (tarball, manual copy).
-              services.udev.extraRules = builtins.readFile ./udev/99-aurora.rules;
+            options.services.aurora = {
+              enable = lib.mkEnableOption "the Aurora keyboard lighting daemon (package, udev rules, and a systemd user service; no home-manager required)";
+
+              package = lib.mkOption {
+                type = lib.types.package;
+                default = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+                defaultText = lib.literalExpression "aurora.packages.\${system}.default";
+                description = "The aurora package to install and run.";
+              };
             };
+
+            config = lib.mkMerge [
+              (lib.mkIf (hwCfg.enable || svcCfg.enable) {
+                # One rule per supported keyboard controller; the file also
+                # serves non-Nix installs (tarball, manual copy).
+                services.udev.extraRules = builtins.readFile ./udev/99-aurora.rules;
+              })
+
+              (lib.mkIf svcCfg.enable {
+                environment.systemPackages = [ svcCfg.package ];
+
+                # Mirrors the home-manager unit above. Declared for every
+                # user, but only starts inside a graphical session — the
+                # udev uaccess rule scopes device access to the seat user.
+                systemd.user.services.aurora = {
+                  description = "Aurora keyboard lighting daemon";
+                  # The ambient, ripple and hotkey features need the session
+                  # environment (WAYLAND_DISPLAY/DISPLAY), hence
+                  # graphical-session.target instead of default.target.
+                  after = [ "graphical-session.target" ];
+                  partOf = [ "graphical-session.target" ];
+                  wantedBy = [ "graphical-session.target" ];
+                  serviceConfig = {
+                    ExecStart = "${svcCfg.package}/bin/aurora daemon";
+                    Restart = "on-failure";
+                    RestartSec = 2;
+                  };
+                };
+              })
+            ];
           };
       };
 
