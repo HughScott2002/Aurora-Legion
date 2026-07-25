@@ -167,6 +167,12 @@ pub struct DaemonState {
     pub custom_effects: Vec<CustomEffect>,
     /// Daemon package version, so clients can spot mismatches.
     pub version: String,
+    /// The EC hardware slot the keyboard is on (Fn+Space cycles it):
+    /// 1 to 3 for the stored lighting slots, 4 while the backlight is off,
+    /// `null` when unknown (no keyboard, or the slot cannot be read).
+    /// Additive field; absent on older daemons.
+    #[serde(default)]
+    pub hardware_slot: Option<u8>,
 }
 
 #[cfg(test)]
@@ -188,6 +194,7 @@ mod tests {
             }],
             custom_effects: Vec::new(),
             version: "0.22.0".to_string(),
+            hardware_slot: Some(2),
         }
     }
 
@@ -277,6 +284,20 @@ mod tests {
         let path = socket_path();
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         assert_eq!(file_name, SOCKET_FILE_NAME);
+    }
+
+    /// States from daemons that predate hardware slot tracking must keep
+    /// parsing; the field is additive and defaults to unknown.
+    #[test]
+    fn state_without_hardware_slot_still_parses() {
+        let mut state = sample_state();
+        state.hardware_slot = None;
+
+        let mut json = serde_json::to_value(&state).unwrap();
+        json.as_object_mut().unwrap().remove("hardware_slot");
+
+        let parsed: DaemonState = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.hardware_slot, None);
     }
 
     /// The old app serialized settings with these exact field names; the

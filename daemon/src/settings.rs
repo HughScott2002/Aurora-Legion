@@ -29,6 +29,11 @@ pub struct Settings {
     pub effects: Vec<CustomEffect>,
     #[serde(alias = "ui_state")]
     pub current_profile: Profile,
+    /// One remembered profile per EC hardware slot (the ones Fn+Space
+    /// cycles); index 0 is slot 1. Files from before this feature lack the
+    /// field; `normalize_hardware_slots` pads it after load.
+    #[serde(default)]
+    pub hardware_slot_profiles: Vec<Profile>,
 }
 
 pub fn settings_file_path() -> Option<PathBuf> {
@@ -96,6 +101,16 @@ impl Settings {
         self.save_to(&path);
     }
 
+    /// Ensure exactly `slot_count` hardware slot profiles exist. Missing
+    /// entries are seeded from `seed` (the profile the keyboard is showing)
+    /// so an untouched slot re-applies familiar lighting instead of black.
+    pub fn normalize_hardware_slots(&mut self, slot_count: usize, seed: &Profile) {
+        while self.hardware_slot_profiles.len() < slot_count {
+            self.hardware_slot_profiles.push(seed.clone());
+        }
+        self.hardware_slot_profiles.truncate(slot_count);
+    }
+
     fn save_to(&self, path: &Path) {
         if let Some(parent) = path.parent() {
             let create_result = fs::create_dir_all(parent);
@@ -137,6 +152,45 @@ fn preserve_corrupt_file(path: &Path) {
     match copy_result {
         Ok(_) => eprintln!("settings: kept the unparseable file at {}", backup_path.display()),
         Err(error) => eprintln!("settings: could not back up the unparseable file: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_without_slot_field_parse_and_normalize() {
+        let legacy = r#"{"profiles": [], "effects": [], "current_profile": {
+            "name": null,
+            "rgb_zones": [
+                {"rgb": [1, 2, 3], "enabled": true},
+                {"rgb": [0, 0, 0], "enabled": true},
+                {"rgb": [0, 0, 0], "enabled": true},
+                {"rgb": [0, 0, 0], "enabled": true}
+            ],
+            "effect": "Static",
+            "direction": "Left",
+            "speed": 1,
+            "brightness": "Low"
+        }}"#;
+
+        let mut settings: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(settings.hardware_slot_profiles.is_empty());
+
+        let seed = settings.current_profile.clone();
+        settings.normalize_hardware_slots(3, &seed);
+        assert_eq!(settings.hardware_slot_profiles.len(), 3);
+        assert_eq!(settings.hardware_slot_profiles[2].rgb_zones[0].rgb, [1, 2, 3]);
+    }
+
+    #[test]
+    fn oversized_slot_list_is_truncated() {
+        let mut settings = Settings::default();
+        let seed = Profile::default();
+        settings.normalize_hardware_slots(5, &seed);
+        settings.normalize_hardware_slots(3, &seed);
+        assert_eq!(settings.hardware_slot_profiles.len(), 3);
     }
 }
 

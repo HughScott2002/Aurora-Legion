@@ -168,6 +168,13 @@ fn run_status() -> ExitCode {
 
     let profile_name = state.current.name.unwrap_or_else(|| "(unsaved)".to_string());
     println!("profile:  {profile_name} ({} effect)", state.current.effect);
+    if let Some(slot) = state.hardware_slot {
+        if slot == legion_rgb_driver::HARDWARE_SLOT_OFF {
+            println!("hw slot:  backlight off (Fn+Space)");
+        } else {
+            println!("hw slot:  {slot} of {}", legion_rgb_driver::HARDWARE_SLOT_RANGE.end());
+        }
+    }
     if let Some(name) = state.custom_effect_playing {
         println!("playing:  custom effect '{name}'");
     }

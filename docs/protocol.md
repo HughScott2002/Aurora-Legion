@@ -171,7 +171,8 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [ Profile, ... ],
   "custom_effects": [ CustomEffect, ... ],
-  "version": "0.21.0"
+  "version": "0.21.0",
+  "hardware_slot": 2
 }
 ```
 
@@ -179,6 +180,13 @@ Subscription semantics:
   or `null` when none plays.
 - `current` is the live profile: what the keyboard shows unless a
   custom effect is playing.
+- `hardware_slot` is the keyboard EC's own lighting slot, the one the
+  Fn+Space key cycles: 1 to 3 for the stored slots, 4 while the
+  backlight is off, `null` when unknown (no keyboard, or the slot
+  cannot be read). Added after protocol version 1 as an additive field;
+  older daemons omit it. The daemon remembers one profile per slot and
+  re-applies it when the user switches slots, so `current` follows the
+  active slot.
 
 ### KeyboardStatus
 

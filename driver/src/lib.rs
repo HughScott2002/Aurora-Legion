@@ -29,6 +29,21 @@ pub const SPEED_RANGE: std::ops::RangeInclusive<u8> = 1..=4;
 pub const BRIGHTNESS_RANGE: std::ops::RangeInclusive<u8> = 1..=2;
 pub const ZONE_RANGE: std::ops::RangeInclusive<u8> = 0..=3;
 
+/// The EC's hardware lighting slots, cycled by Fn+Space. The controller
+/// stores a profile per slot; no HID command is known to select or program
+/// a specific slot, only to read the counter (see `SlotReader`).
+pub const HARDWARE_SLOT_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
+
+/// Slot counter value the EC reports while the backlight is off.
+pub const HARDWARE_SLOT_OFF: u8 = 4;
+
+/// One feature report on this device: the 0xCC report ID plus 32 payload
+/// bytes, in both the SET and GET directions.
+const FEATURE_REPORT_BYTES: usize = 33;
+
+/// Report ID of the lighting feature report.
+const FEATURE_REPORT_ID: u8 = 0xcc;
+
 pub enum BaseEffects {
     Static,
     Breath,
@@ -194,11 +209,8 @@ impl Keyboard {
     }
 }
 
-pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
-    let api: HidApi = HidApi::new()?;
-
-    let info = api
-        .device_list()
+fn find_known_device(api: &HidApi) -> Result<&hidapi::DeviceInfo> {
+    api.device_list()
         .find(|d| {
             #[cfg(target_os = "windows")]
             {
@@ -214,7 +226,54 @@ pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
                 KNOWN_DEVICE_INFOS.iter().any(|known| (known.0, known.1) == info_tuple)
             }
         })
-        .ok_or(error::Error::DeviceNotFound)?;
+        .ok_or(error::Error::DeviceNotFound)
+}
+
+/// A second, read-only handle to the keyboard controller, used to read the
+/// EC's hardware slot counter. Separate from [`Keyboard`] because the engine
+/// thread that owns the write handle blocks for the whole lifetime of a
+/// software effect, while slot reads happen on the daemon core thread.
+pub struct SlotReader {
+    device_hid: HidDevice,
+}
+
+impl SlotReader {
+    /// Reads the EC's current hardware slot counter: a value in
+    /// [`HARDWARE_SLOT_RANGE`] for the stored lighting slots, or
+    /// [`HARDWARE_SLOT_OFF`] while the backlight is off. Anything else is
+    /// rejected as out of range instead of trusted.
+    pub fn read_slot_index(&self) -> Result<u8> {
+        let mut report: [u8; FEATURE_REPORT_BYTES] = [0; FEATURE_REPORT_BYTES];
+        report[0] = FEATURE_REPORT_ID;
+
+        let read_count = self.device_hid.get_feature_report(&mut report)?;
+        if read_count < 2 {
+            return Err(RangeError { kind: RangeErrorKind::Slot }.into());
+        }
+
+        let slot_index = report[1];
+        let is_lighting_slot = HARDWARE_SLOT_RANGE.contains(&slot_index);
+        let is_off = slot_index == HARDWARE_SLOT_OFF;
+        if !is_lighting_slot && !is_off {
+            return Err(RangeError { kind: RangeErrorKind::Slot }.into());
+        }
+
+        Ok(slot_index)
+    }
+}
+
+pub fn open_slot_reader() -> Result<SlotReader> {
+    let api: HidApi = HidApi::new()?;
+    let info = find_known_device(&api)?;
+    let device_hid: HidDevice = info.open_device(&api)?;
+
+    Ok(SlotReader { device_hid })
+}
+
+pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
+    let api: HidApi = HidApi::new()?;
+
+    let info = find_known_device(&api)?;
 
     let keyboard_hid: HidDevice = info.open_device(&api)?;
     let current_state: LightingState = LightingState {

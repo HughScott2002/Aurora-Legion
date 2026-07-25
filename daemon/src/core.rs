@@ -8,6 +8,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    thread,
     time::{Duration, Instant},
 };
 
@@ -16,6 +17,7 @@ use aurora_protocol::{
     ipc::{DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus, Request, Response, ResponseEnvelope},
     profile::Profile,
 };
+use legion_rgb_driver::{SlotReader, HARDWARE_SLOT_OFF, HARDWARE_SLOT_RANGE};
 
 use crate::{
     engine::{EffectManager, StopSignals, SOFTWARE_SPEED_RANGE},
@@ -40,6 +42,14 @@ const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
 /// settings file and every state broadcast with it.
 const MAX_CUSTOM_EFFECT_STEPS: usize = 4096;
 
+/// After the Fn+Space WMI event the EC updates its slot counter
+/// asynchronously and offers no completion signal, so the readback is a
+/// bounded poll: at most this many reads, one every
+/// [`SLOT_POLL_INTERVAL_MS`] (the upper bound maniac103's daemon observed
+/// in practice; see docs/research/ite8295-hardware-profiles.md).
+const SLOT_POLL_MAX_READS: u32 = 100;
+const SLOT_POLL_INTERVAL_MS: u64 = 10;
+
 /// Commands the core accepts. Keep this the only way to mutate daemon state.
 pub enum Command {
     Ipc {
@@ -48,6 +58,10 @@ pub enum Command {
         out_tx: Sender<Outbound>,
     },
     CycleProfile,
+    /// The Fn+Space "light profile change" WMI event fired; sent by the
+    /// slot watcher thread. The core reacts by re-reading the EC's slot
+    /// counter and applying the remembered profile for the new slot.
+    HardwareSlotEvent,
     /// SIGTERM/SIGINT arrived; sent by the signal listener thread so the
     /// core wakes immediately instead of on its next tick.
     ShutdownSignal,
@@ -70,6 +84,13 @@ pub struct Core {
     engine: Option<EffectManager>,
     stop_signals: StopSignals,
 
+    /// Read-only handle for the EC's hardware slot counter; acquired and
+    /// dropped alongside the engine.
+    slot_reader: Option<SlotReader>,
+    /// Last observed EC slot: 1..=3, HARDWARE_SLOT_OFF, or None when
+    /// unknown (no keyboard, or the counter is unreadable).
+    hardware_slot: Option<u8>,
+
     subscribers: Vec<Sender<Outbound>>,
 
     settings_dirty: bool,
@@ -82,8 +103,11 @@ pub struct Core {
 }
 
 pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
-    let settings = Settings::load_or_migrate();
+    let mut settings = Settings::load_or_migrate();
     let current_profile = settings.current_profile.clone();
+
+    let hardware_slot_count = *HARDWARE_SLOT_RANGE.end() as usize;
+    settings.normalize_hardware_slots(hardware_slot_count, &current_profile);
 
     let mut core = Core {
         settings,
@@ -92,6 +116,8 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         keyboard_status: KeyboardStatus::Searching,
         engine: None,
         stop_signals: StopSignals::new(),
+        slot_reader: None,
+        hardware_slot: None,
         subscribers: Vec::new(),
         settings_dirty: false,
         last_change_at: Instant::now(),
@@ -110,7 +136,12 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
 
         match command_rx.recv_timeout(core.next_tick_timeout()) {
             Ok(command) => core.handle_command(command),
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                // Tick-time backstop for Fn+Space: catches slot changes when
+                // the netlink listener is unavailable or the event type
+                // differs on this model. One GET_FEATURE ioctl per tick.
+                core.sync_hardware_slot(false);
+            }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
 
@@ -139,6 +170,8 @@ impl Core {
         }
 
         self.stop_signals = StopSignals::new();
+        self.slot_reader = None;
+        self.hardware_slot = None;
         self.keyboard_status = KeyboardStatus::Searching;
         self.acquire_attempt_count = 0;
         self.next_acquire_at = Instant::now();
@@ -159,12 +192,15 @@ impl Core {
 
         match outcome {
             AcquireOutcome::Acquired(keyboard) => {
-                eprintln!("core: keyboard acquired, applying current profile");
                 let engine = EffectManager::new(*keyboard, self.stop_signals.clone());
-                engine.set_profile(self.current_profile.clone());
                 self.engine = Some(engine);
                 self.keyboard_status = KeyboardStatus::Connected;
                 self.custom_effect_playing = None;
+                // Learn which EC slot the keyboard is on BEFORE writing
+                // anything, so the right slot's profile is applied and no
+                // slot's memory is overwritten by a stale live profile.
+                self.acquire_slot_reader();
+                self.apply_profile_for_acquired_slot();
                 self.broadcast_state();
             }
             AcquireOutcome::Failed(status) => {
@@ -196,6 +232,9 @@ impl Core {
                 if let Response::Error { message, .. } = response {
                     eprintln!("core: hotkey profile cycle failed: {message}");
                 }
+            }
+            Command::HardwareSlotEvent => {
+                self.sync_hardware_slot(true);
             }
             Command::ShutdownSignal => {
                 self.shutdown_requested = true;
@@ -259,6 +298,10 @@ impl Core {
         }
     }
 
+    // A client request while the backlight is off (hardware slot 4) is
+    // still applied: an explicit "light the keyboard like this" beats the
+    // remembered off state. It is not stored into any slot; only the
+    // lighting slots 1..=3 remember profiles.
     fn set_profile(&mut self, profile: Profile) -> Response {
         if let Some(rejection) = validate_profile(&profile) {
             return rejection;
@@ -270,6 +313,7 @@ impl Core {
             engine.set_profile(profile);
         }
 
+        self.store_current_into_active_slot();
         self.mark_changed();
         self.broadcast_state();
         Response::Ok
@@ -442,6 +486,174 @@ impl Core {
         }
     }
 
+    // --- Hardware slots (Fn+Space) ---------------------------------------
+
+    /// Open the read-only slot handle and learn which EC slot the keyboard
+    /// is on. Failure disables slot tracking until the next acquisition; the
+    /// rest of the daemon is unaffected.
+    fn acquire_slot_reader(&mut self) {
+        match legion_rgb_driver::open_slot_reader() {
+            Ok(reader) => {
+                self.slot_reader = Some(reader);
+            }
+            Err(error) => {
+                eprintln!("core: hardware slot tracking disabled, could not open reader: {error}");
+                self.slot_reader = None;
+                self.hardware_slot = None;
+                return;
+            }
+        }
+
+        self.hardware_slot = self.read_slot_once();
+    }
+
+    /// First write after acquisition. Respect what the EC is showing: a
+    /// known lighting slot applies that slot's remembered profile, off
+    /// writes nothing, and an unknown slot (no reader) falls back to the
+    /// last live profile, which is the pre-slot-tracking behavior.
+    fn apply_profile_for_acquired_slot(&mut self) {
+        match self.hardware_slot {
+            Some(slot) if HARDWARE_SLOT_RANGE.contains(&slot) => {
+                let slot_position = (slot - 1) as usize;
+                let Some(slot_profile) = self.settings.hardware_slot_profiles.get(slot_position) else {
+                    // Cannot happen after normalize_hardware_slots.
+                    eprintln!("core: no remembered profile for hardware slot {slot}");
+                    return;
+                };
+
+                eprintln!("core: keyboard acquired on hardware slot {slot}, applying its remembered profile");
+                let slot_profile = slot_profile.clone();
+                self.current_profile = slot_profile.clone();
+                if let Some(engine) = &self.engine {
+                    engine.set_profile(slot_profile);
+                }
+                self.mark_changed();
+            }
+            Some(_off) => {
+                eprintln!("core: keyboard acquired with the backlight off, not writing");
+            }
+            None => {
+                eprintln!("core: keyboard acquired, applying current profile");
+                let profile = self.current_profile.clone();
+                if let Some(engine) = &self.engine {
+                    engine.set_profile(profile);
+                }
+            }
+        }
+    }
+
+    fn read_slot_once(&mut self) -> Option<u8> {
+        let Some(reader) = &self.slot_reader else {
+            return None;
+        };
+
+        match reader.read_slot_index() {
+            Ok(slot_index) => Some(slot_index),
+            Err(error) => {
+                // Do not retry every tick against a device that cannot
+                // answer; tracking comes back on the next acquisition. The
+                // stale slot is cleared so clients see "unknown", not a
+                // slot the EC may have long left.
+                eprintln!("core: hardware slot read failed, slot tracking disabled: {error}");
+                self.slot_reader = None;
+                self.hardware_slot = None;
+                self.broadcast_state();
+                None
+            }
+        }
+    }
+
+    /// Re-read the EC slot counter and react to a change: apply the
+    /// remembered profile of the newly active slot, or stop writing when
+    /// the user turned the backlight off.
+    ///
+    /// `wait_for_change` is set on the Fn+Space WMI event, where the EC
+    /// updates the counter shortly *after* the event; the bounded poll
+    /// (SLOT_POLL_MAX_READS x SLOT_POLL_INTERVAL_MS) covers that gap. The
+    /// tick-time backstop passes `false` and reads exactly once.
+    fn sync_hardware_slot(&mut self, wait_for_change: bool) {
+        if self.slot_reader.is_none() {
+            return;
+        }
+
+        let previous_slot = self.hardware_slot;
+        let mut observed_slot: Option<u8>;
+        let mut read_count: u32 = 0;
+
+        loop {
+            observed_slot = self.read_slot_once();
+            if observed_slot.is_none() {
+                return; // Read failed; tracking is now disabled.
+            }
+            read_count += 1;
+
+            if !wait_for_change {
+                break;
+            }
+            if observed_slot != previous_slot {
+                break;
+            }
+            if read_count >= SLOT_POLL_MAX_READS {
+                break;
+            }
+            thread::sleep(Duration::from_millis(SLOT_POLL_INTERVAL_MS));
+        }
+
+        let Some(new_slot) = observed_slot else {
+            return;
+        };
+        if Some(new_slot) == previous_slot {
+            return;
+        }
+
+        self.hardware_slot = Some(new_slot);
+
+        if new_slot == HARDWARE_SLOT_OFF {
+            // The user turned the backlight off with Fn+Space; stop any
+            // software effect so the daemon does not fight the EC, and do
+            // not write to the device.
+            eprintln!("core: hardware backlight off (slot {new_slot})");
+            self.custom_effect_playing = None;
+            self.stop_signals.store_true();
+            self.broadcast_state();
+            return;
+        }
+
+        let slot_position = (new_slot - 1) as usize;
+        let Some(slot_profile) = self.settings.hardware_slot_profiles.get(slot_position) else {
+            // Cannot happen after normalize_hardware_slots; be safe anyway.
+            eprintln!("core: no remembered profile for hardware slot {new_slot}");
+            return;
+        };
+
+        eprintln!("core: hardware slot {new_slot} active, applying its remembered profile");
+        let slot_profile = slot_profile.clone();
+        self.current_profile = slot_profile.clone();
+        self.custom_effect_playing = None;
+        if let Some(engine) = &self.engine {
+            engine.set_profile(slot_profile);
+        }
+
+        self.mark_changed();
+        self.broadcast_state();
+    }
+
+    /// Every lighting change lands in whichever EC slot is active, so the
+    /// slot's remembered profile follows the live profile.
+    fn store_current_into_active_slot(&mut self) {
+        let Some(active_slot) = self.hardware_slot else {
+            return;
+        };
+        if !HARDWARE_SLOT_RANGE.contains(&active_slot) {
+            return; // Off (or unknown) stores nothing.
+        }
+
+        let slot_position = (active_slot - 1) as usize;
+        if let Some(slot_entry) = self.settings.hardware_slot_profiles.get_mut(slot_position) {
+            *slot_entry = self.current_profile.clone();
+        }
+    }
+
     // --- State + persistence ---------------------------------------------
 
     fn state_snapshot(&self) -> DaemonState {
@@ -452,6 +664,7 @@ impl Core {
             profiles: self.settings.profiles.clone(),
             custom_effects: self.settings.effects.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            hardware_slot: self.hardware_slot,
         }
     }
 
