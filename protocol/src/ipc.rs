@@ -25,6 +25,13 @@ pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// see `docs/protocol.md` for the negotiation rules.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Number of EC hardware lighting slots: `DaemonState::hardware_slot` is
+/// 1 to this value while a slot is lit. Fn+Space cycles them.
+pub const HARDWARE_SLOT_COUNT: u8 = 3;
+
+/// `DaemonState::hardware_slot` value while the backlight is off.
+pub const HARDWARE_SLOT_OFF: u8 = 4;
+
 pub const SOCKET_FILE_NAME: &str = "aurora.sock";
 
 /// Path of the daemon socket: `$XDG_RUNTIME_DIR/aurora.sock`, with a

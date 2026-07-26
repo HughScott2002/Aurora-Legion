@@ -17,6 +17,9 @@ use crate::{
 pub struct LightingPage {
     pub root: gtk::Widget,
     pub preview: KeyboardPreview,
+    /// Caption under the preview naming the active EC hardware slot
+    /// (Fn+Space); hidden on machines where the slot cannot be read.
+    pub slot_label: gtk::Label,
 
     pub effect_row: adw::ComboRow,
 
@@ -54,8 +57,19 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     content.set_margin_end(12);
 
     // --- Preview ---------------------------------------------------------
+    // The preview and its slot caption sit in their own tighter box: the
+    // page's 18px spacing is for group boundaries, the caption belongs to
+    // the preview.
     let preview = KeyboardPreview::new();
-    content.append(&preview.root);
+    let slot_label = gtk::Label::new(None);
+    slot_label.add_css_class("caption");
+    slot_label.add_css_class("dim-label");
+    slot_label.set_visible(false);
+
+    let preview_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    preview_box.append(&preview.root);
+    preview_box.append(&slot_label);
+    content.append(&preview_box);
 
     // --- Effect selector -------------------------------------------------
     let effect_group = adw::PreferencesGroup::new();
@@ -91,6 +105,12 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     for zone_index in 0..4 {
         let button = gtk::ColorDialogButton::new(Some(gtk::ColorDialog::new()));
         button.set_valign(gtk::Align::Center);
+
+        // Four identical unlabeled buttons are indistinguishable to a
+        // screen reader (and to hover) without these.
+        let description = format!("Zone {} color", zone_index + 1);
+        button.set_tooltip_text(Some(&description));
+        button.update_property(&[gtk::accessible::Property::Label(&description)]);
 
         let zone_sender = sender.clone();
         button.connect_rgba_notify(move |button| {
@@ -231,6 +251,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     LightingPage {
         root: scrolled.upcast(),
         preview,
+        slot_label,
         effect_row,
         zone_buttons,
         colors_group,

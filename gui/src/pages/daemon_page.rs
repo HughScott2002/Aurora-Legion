@@ -36,6 +36,7 @@ pub fn build(sender: &ComponentSender<App>) -> DaemonPage {
     let restart_button = gtk::Button::from_icon_name("view-refresh-symbolic");
     restart_button.add_css_class("flat");
     restart_button.set_valign(gtk::Align::Center);
+    restart_button.set_tooltip_text(Some("Restart the daemon"));
     let restart_sender = sender.clone();
     restart_button.connect_clicked(move |_| {
         restart_sender.input(AppMsg::DaemonRestartRequested);
