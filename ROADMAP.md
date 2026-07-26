@@ -20,9 +20,6 @@ Two things hold across every milestone:
    the pre-push gate, and the daemon's measured footprint
    ([~10 MiB resident](docs/measurements.md)) is a budget, not a brag.
 
-Architecture decisions behind this plan live in the
-[cross-platform design spec](docs/superpowers/specs/2026-07-19-cross-platform-design.md).
-
 ## M1: Linux flagship polish
 
 Native feel complete on GNOME/Wayland. The GUI and daemon behave like a
@@ -96,6 +93,5 @@ A native-feeling Windows app on the same protocol.
 
 - macOS: no Legion hardware runs it.
 - Windows Service mode: Run key autostart is enough.
-- Hosted web configurator: rejected in the design spec; if a web UI is
-  ever revisited, it should be embedded in the daemon and served from
-  localhost, not hosted remotely.
+- Hosted web configurator: rejected. If a web UI is ever revisited, it
+  should be embedded in the daemon and served from localhost.

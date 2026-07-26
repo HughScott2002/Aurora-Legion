@@ -43,6 +43,8 @@ and a working Fn+Space cycle.
   persistent daemon from transient clients.
 - [Fn+Space synchronization](explanation/fn-space-sync.md): why Aurora
   counts WMI events instead of polling the EC profile counter.
+- [Roadmap](../ROADMAP.md): the order and limits of planned platform
+  work.
 
 ## Research
 
