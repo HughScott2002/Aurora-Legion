@@ -1,10 +1,9 @@
 # Aurora IPC protocol
 
-The contract between the Aurora daemon and any client (the GTK GUI, the
-CLI, or a third-party frontend). This document is complete on purpose:
-a client can be written from it alone, in any language, without reading
-the Rust types. The types live in [`protocol/src/ipc.rs`](../protocol/src/ipc.rs);
-if this document and the code disagree, that is a bug in this document.
+This reference defines the interface between the daemon and every
+client. It is enough to implement a client without reading Rust. The
+types live in [`protocol/src/ipc.rs`](../protocol/src/ipc.rs). If code
+and this page disagree, this page is wrong.
 
 Protocol version: **1** (`PROTOCOL_VERSION` in the protocol crate).
 
@@ -77,7 +76,7 @@ Handshake: send `Hello` first on every new connection.
 
 ```json
 {"id": 1, "req": {"type": "Hello", "protocol_version": 1}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 1, "daemon_version": "0.21.0"}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 1, "daemon_version": "0.22.0"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
@@ -171,7 +170,7 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [ Profile, ... ],
   "custom_effects": [ CustomEffect, ... ],
-  "version": "0.21.0",
+  "version": "0.22.0",
   "hardware_slot": 2
 }
 ```
@@ -187,6 +186,8 @@ Subscription semantics:
   events because Aurora's own lighting writes invalidate later counter
   reads. Added after protocol version 1 as an additive field; older
   daemons omit it. `current` follows the active lighting slot.
+  See [Fn+Space synchronization](explanation/fn-space-sync.md) for the
+  reason this is logical state.
 
 ### KeyboardStatus
 
@@ -303,7 +304,7 @@ protocol, but hardware effects survive a daemon stop.
 
 ```text
 C: {"id":1,"req":{"type":"Hello","protocol_version":1}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":1,"daemon_version":"0.21.0"}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":1,"daemon_version":"0.22.0"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}

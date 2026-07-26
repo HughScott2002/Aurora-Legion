@@ -1,25 +1,25 @@
-# Measurements
+# Performance measurements
 
-Collected 2026-07-18 on the development machine: Lenovo Legion Pro (2023,
-keyboard controller 048d:c985), NixOS, GNOME on Wayland. Both versions
-were built by the same nix pipeline (release profile, same toolchain):
+Measured 2026-07-18 on a 2023 Lenovo Legion Pro with controller
+`048d:c985`, NixOS and GNOME on Wayland. Both builds used the same Nix
+release pipeline and toolchain:
 
-- upstream baseline: `legion-kb-rgb` 0.20.8, built from git rev
+- Baseline: `legion-kb-rgb` 0.20.8 at
   `b05be4c` (the last commit before the rearchitecture)
-- aurora 0.21.0: `nix build` at `4aca7b0`
+- Aurora 0.21.0: `nix build` at `4aca7b0`
 
 ## Method
 
-- Memory is PSS read from `/proc/PID/smaps_rollup` (proportional
-  accounting of shared pages; fairer than RSS for GUI stacks).
+- Memory is PSS from `/proc/PID/smaps_rollup`. PSS accounts for shared
+  pages and gives a fairer GUI comparison than RSS.
 - CPU is the utime+stime delta from `/proc/PID/stat` over a 60 second
   window, expressed as percent of one core.
 - Sampler: [`measure.sh`](measure.sh). Two passes per scenario, no other
-  workload running. Values rounded against aurora, not in its favor.
-- The upstream app and the aurora daemon were never running at the same
+  workload. Values were rounded against Aurora.
+- The upstream app and Aurora daemon were never running at the same
   time (they would contend for the same hidraw device).
 
-## Results (two passes each)
+## Results
 
 | Scenario | PSS pass 1 | PSS pass 2 | CPU pass 1 | CPU pass 2 |
 | --- | --- | --- | --- | --- |
@@ -32,9 +32,9 @@ were built by the same nix pipeline (release profile, same toolchain):
 Binary sizes from the nix outputs (`du -b`): upstream single binary
 26.6 MB; aurora daemon 8.4 MB plus GUI 2.5 MB.
 
-## Post-fix: idle CPU (issue #1)
+## Idle CPU after issue #1
 
-The first measurement round showed aurora idling at 0.17% versus
+The first round showed Aurora idling at 0.17% versus
 upstream's 0.10% because the engine idle loop woke every 20 ms, the core
 ticked every 250 ms and the hotkey polled every 50 ms. After the fix
 (engine blocks on its channel, core ticks at 2 s when healthy with a
@@ -47,15 +47,14 @@ two-pass measurement reads:
 
 SIGTERM-to-exit latency measured at 160 ms with the slow tick active.
 
-## Reading the numbers honestly
+## Interpretation
 
 - The resident process (what runs whenever your lights are on) shrinks
   from 82.6 MiB to about 10 MiB, because the resident part no longer
   carries a GUI toolkit, a renderer or a tray stack.
-- Idle CPU was *worse* in the first round: 0.17% versus upstream's
-  0.10%, from timer wakeups. The polling fix above brings it to 0.04%,
-  now below upstream. The remaining cost is the 100 ms hotkey poll,
-  which device_query cannot avoid.
+- Idle CPU was worse in the first round: 0.17% versus upstream's 0.10%.
+  Removing timer wakeups brought it to 0.04%. The remaining 100 ms
+  hotkey poll comes from `device_query`.
 - Swipe CPU is comparable with higher variance (0.55 to 0.97% versus a
   steady 0.52%); the work (HID transitions) is the same code inherited
   from upstream.
