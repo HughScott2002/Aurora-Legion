@@ -10,7 +10,10 @@
 //!
 //! On any setup failure (no netlink permission, family missing, non-Lenovo
 //! hardware) the listener logs and disables itself; the daemon carries on
-//! and the core's tick-time slot check remains as the slow fallback.
+//! without Fn+Space sync. There is deliberately no polling fallback: the
+//! EC's counter moves in response to the daemon's own lighting writes
+//! (without firing this event), so watching it outside an event window
+//! reads write noise and loops.
 //!
 //! The netlink plumbing is hand-rolled against libc because the only
 //! operations needed are: resolve the `acpi_event` family, join its
@@ -62,10 +65,12 @@ const WMI_DEVICE_CLASS: &str = "wmi";
 /// PNP id is matched).
 const WMI_BUS_ID_PREFIX: &str = "PNP0C14";
 
-/// Event type of the GameZone light-profile-change notification (notify ID
-/// 0xE6). On models where the notify ID differs the listener simply never
-/// fires and the core's tick-time slot check picks the change up instead.
-const LIGHT_PROFILE_EVENT_TYPE: u32 = 0xE600;
+/// Event types of the GameZone light-profile-change notification, DSDT
+/// notify ID 0xE6. Observed raw as 0x00E6 on a 2023 Pro (kernel 6.12);
+/// maniac103's 2021 trace saw it packed as 0xE600, so both encodings are
+/// accepted. Each press also fires an unrelated 0xE8 event, which the
+/// filter drops.
+const LIGHT_PROFILE_EVENT_TYPES: [u32; 2] = [0xE6, 0xE600];
 
 /// Netlink datagrams are small; the largest we read is the control
 /// family's GETFAMILY answer (family attrs plus its ops list).
@@ -76,7 +81,7 @@ pub fn spawn(command_tx: Sender<Command>) {
         let (socket, family_id) = match connect_acpi_events() {
             Ok(connected) => connected,
             Err(message) => {
-                eprintln!("slot_watch: {message}; Fn+Space detection disabled, tick fallback stays active");
+                eprintln!("slot_watch: {message}; Fn+Space detection disabled");
                 return;
             }
         };
@@ -326,7 +331,7 @@ fn is_light_profile_event(datagram: &[u8], family_id: u16) -> bool {
             let Some(event_type) = read_u32_ne(attr_payload, EVENT_TYPE_OFFSET) else {
                 continue;
             };
-            if event_type == LIGHT_PROFILE_EVENT_TYPE {
+            if LIGHT_PROFILE_EVENT_TYPES.contains(&event_type) {
                 return true;
             }
         }
@@ -585,29 +590,41 @@ mod tests {
     }
 
     #[test]
-    fn light_profile_event_is_recognized() {
-        let mut attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", LIGHT_PROFILE_EVENT_TYPE));
-        let datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &attrs);
+    fn light_profile_event_is_recognized_in_both_encodings() {
+        // Raw notify ID, as a 2023 Pro reports it (bus instance :02 there).
+        let mut raw_attrs: Vec<u8> = Vec::new();
+        push_attribute(&mut raw_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE6));
+        let raw_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &raw_attrs);
+        assert!(is_light_profile_event(&raw_datagram, 24));
 
-        assert!(is_light_profile_event(&datagram, 24));
+        // Packed form, as maniac103's 2021 trace reports it.
+        let mut packed_attrs: Vec<u8> = Vec::new();
+        push_attribute(&mut packed_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE600));
+        let packed_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &packed_attrs);
+        assert!(is_light_profile_event(&packed_datagram, 24));
     }
 
     #[test]
     fn other_events_are_ignored() {
         // Wrong device class.
         let mut battery_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut battery_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("battery", "PNP0C0A:00", LIGHT_PROFILE_EVENT_TYPE));
+        push_attribute(&mut battery_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("battery", "PNP0C0A:00", 0xE6));
         let battery_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &battery_attrs);
         assert!(!is_light_profile_event(&battery_datagram, 24));
 
         // Wrong bus id (a WMI event from some other mapper device).
         let mut other_wmi_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut other_wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "OTHER123:00", LIGHT_PROFILE_EVENT_TYPE));
+        push_attribute(&mut other_wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "OTHER123:00", 0xE6));
         let other_wmi_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &other_wmi_attrs);
         assert!(!is_light_profile_event(&other_wmi_datagram, 24));
 
-        // Wrong event type (thermal mode hotkey, for example).
+        // Wrong event type: the 0xE8 event that accompanies every press,
+        // and the thermal-mode hotkey.
+        let mut companion_attrs: Vec<u8> = Vec::new();
+        push_attribute(&mut companion_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE8));
+        let companion_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &companion_attrs);
+        assert!(!is_light_profile_event(&companion_datagram, 24));
+
         let mut thermal_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut thermal_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xD000));
         let thermal_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &thermal_attrs);
@@ -615,7 +632,7 @@ mod tests {
 
         // Wrong family id entirely.
         let mut wmi_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", LIGHT_PROFILE_EVENT_TYPE));
+        push_attribute(&mut wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE6));
         let wrong_family_datagram = wrap_in_message(30, ACPI_GENL_CMD_EVENT, &wmi_attrs);
         assert!(!is_light_profile_event(&wrong_family_datagram, 24));
     }
@@ -623,7 +640,7 @@ mod tests {
     #[test]
     fn truncated_datagrams_do_not_panic() {
         let mut attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", LIGHT_PROFILE_EVENT_TYPE));
+        push_attribute(&mut attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE6));
         let datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &attrs);
 
         for cut in 0..datagram.len() {

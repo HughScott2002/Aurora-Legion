@@ -8,13 +8,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Fn+Space hardware profile sync: the daemon now notices when the
-  keyboard's own profile key cycles the EC's lighting slots, remembers
-  one Aurora profile per slot, and re-applies the remembered profile of
-  the slot you switch to. Turning the backlight off with Fn+Space is
-  respected (the daemon stops writing until the next change). The
-  active slot is reported as `hardware_slot` in the daemon state and by
-  `aurora status` (#14).
+- Fn+Space hardware profile sync: the daemon listens for the Fn+Space
+  firmware event, remembers one Aurora profile per hardware slot, and
+  re-applies the remembered profile of the slot you switch to. Turning
+  the backlight off with Fn+Space is respected (the daemon stops
+  writing until the next change). The active slot is reported as
+  `hardware_slot` in the daemon state, by `aurora status`, and as a
+  caption under the keyboard preview in the app (#14).
 
 ## [0.22.0] - 2026-07-21
 

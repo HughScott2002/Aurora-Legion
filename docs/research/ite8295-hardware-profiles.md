@@ -312,9 +312,14 @@ boot-time EC restoration will otherwise override it
 Observed while building Aurora's slot sync against real hardware; these
 extend or correct the sourced claims above.
 
-- The GET_FEATURE readback and the netlink event chain both work as
-  documented: family "acpi_event", group "acpi_mc_group", class "wmi",
-  bus id "PNP0C14:01", type 0xE600, joinable without privileges.
+- The GET_FEATURE readback and the netlink event chain both work, with
+  two corrections to the sourced claims: on this unit (kernel 6.12) the
+  event arrives with type 0x00E6, the raw DSDT notify ID, NOT the
+  0xE600 packing maniac103 recorded; and the bus id is "PNP0C14:02",
+  not ":01" (the instance number varies per machine, match the PNP id
+  prefix only). Every press also fires a companion event with type
+  0xE8 from the same device. The family/group ("acpi_event",
+  "acpi_mc_group") join is unprivileged as documented.
 - With hidapi's libusb backend the HID interface can be claimed once:
   a second `open_device` on the same controller fails while the first
   handle is held. A reader must share the writer's handle.
@@ -328,3 +333,14 @@ extend or correct the sourced claims above.
   queue, the second read already sees the newest slot); the final state
   is still correct, but do not conclude a slot is unused from a short
   trace.
+- **The counter cannot be watched passively.** A software `0xCC 0x16`
+  write MOVES the counter (one static write flipped a stable
+  reading from 4 to 3) and does NOT fire the WMI event (0 events on
+  the ACPI socket across the write). A daemon that polls the counter
+  on a timer therefore reads its own write noise as user activity and
+  loops: read slot, apply profile, write moves counter, "new slot",
+  apply again, forever. The loop stays invisible while every slot
+  holds identical contents (the counter appears to keep matching) and
+  starts the moment slot profiles differ. Detection must be anchored
+  to the WMI event, and the post-press value must be compared against
+  a fresh read taken at event time, not against remembered state.

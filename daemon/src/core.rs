@@ -47,6 +47,12 @@ const MAX_CUSTOM_EFFECT_STEPS: usize = 4096;
 /// bounded poll: at most this many reads, one every
 /// [`SLOT_POLL_INTERVAL_MS`] (the upper bound maniac103's daemon observed
 /// in practice; see docs/research/ite8295-hardware-profiles.md).
+///
+/// The counter is read ONLY inside this event-anchored window (plus once
+/// at acquisition). It cannot be watched passively: the daemon's own
+/// lighting writes move the counter without firing the WMI event
+/// (observed live on a 2023 Pro), so a periodic check reads write noise
+/// and re-applies profiles in an endless loop.
 const SLOT_POLL_MAX_READS: u32 = 100;
 const SLOT_POLL_INTERVAL_MS: u64 = 10;
 
@@ -91,7 +97,7 @@ pub struct Core {
     /// unknown (no keyboard, or the counter is unreadable).
     hardware_slot: Option<u8>,
     /// True while slot reads are erroring, so the log gets one line per
-    /// failure streak instead of one per tick.
+    /// failure streak instead of one per read.
     slot_read_failing: bool,
 
     subscribers: Vec<Sender<Outbound>>,
@@ -140,12 +146,7 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
 
         match command_rx.recv_timeout(core.next_tick_timeout()) {
             Ok(command) => core.handle_command(command),
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                // Tick-time backstop for Fn+Space: catches slot changes when
-                // the netlink listener is unavailable or the event type
-                // differs on this model. One GET_FEATURE ioctl per tick.
-                core.sync_hardware_slot(false);
-            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
 
@@ -244,7 +245,7 @@ impl Core {
                 }
             }
             Command::HardwareSlotEvent => {
-                self.sync_hardware_slot(true);
+                self.sync_hardware_slot();
             }
             Command::ShutdownSignal => {
                 self.shutdown_requested = true;
@@ -502,6 +503,12 @@ impl Core {
     /// known lighting slot applies that slot's remembered profile, off
     /// writes nothing, and an unknown slot (no reader) falls back to the
     /// last live profile, which is the pre-slot-tracking behavior.
+    ///
+    /// The counter read here may carry noise from a previous daemon's
+    /// writes (see `sync_hardware_slot`); the worst case is one wrong
+    /// slot's profile applied once at startup, which the next Fn+Space
+    /// press corrects. No loop is possible because nothing re-reads the
+    /// counter outside event windows.
     fn apply_profile_for_acquired_slot(&mut self) {
         match self.hardware_slot {
             Some(slot) if HARDWARE_SLOT_RANGE.contains(&slot) => {
@@ -561,65 +568,62 @@ impl Core {
         }
     }
 
-    /// Re-read the EC slot counter and react to a change: apply the
-    /// remembered profile of the newly active slot, or stop writing when
-    /// the user turned the backlight off.
+    /// React to the Fn+Space WMI event: work out which slot the EC landed
+    /// on and apply that slot's remembered profile (or stop writing when
+    /// the user turned the backlight off).
     ///
-    /// `wait_for_change` is set on the Fn+Space WMI event, where the EC
-    /// updates the counter shortly *after* the event; the bounded poll
-    /// (SLOT_POLL_MAX_READS x SLOT_POLL_INTERVAL_MS) covers that gap. The
-    /// tick-time backstop passes `false` and reads exactly once.
-    fn sync_hardware_slot(&mut self, wait_for_change: bool) {
+    /// The counter's absolute value is only meaningful here, anchored to
+    /// the event: the daemon's own writes move it silently, so it is
+    /// compared against a fresh read taken now, never against the
+    /// displayed slot. The EC updates the counter shortly *after* the
+    /// event, so the whole exchange is one bounded poll: first successful
+    /// read is the pre-press (or already settled) value, then wait for
+    /// the counter to move off it; if it never moves within the budget,
+    /// the first read already was the settled post-press value.
+    fn sync_hardware_slot(&mut self) {
         if self.slot_reader.is_none() {
             return;
         }
 
-        let previous_slot = self.hardware_slot;
-        let mut observed_slot: Option<u8> = None;
         let mut read_count: u32 = 0;
-        let mut transient_logged = false;
 
-        loop {
-            let raw_value = self.read_slot_once();
+        // First successful read; failures here are the EC mid-switch.
+        let mut first_value: Option<u8> = None;
+        while read_count < SLOT_POLL_MAX_READS {
+            first_value = self.read_slot_once();
             read_count += 1;
-
-            match raw_value {
-                Some(value) if is_settled_slot_value(value) => {
-                    observed_slot = Some(value);
-                    if !wait_for_change {
-                        break;
-                    }
-                    if observed_slot != previous_slot {
-                        break;
-                    }
-                }
-                _ => {
-                    // The EC reports values outside 1..=4 while it is
-                    // mid-switch (observed live); not a slot, keep polling
-                    // on the event path and skip on the tick path.
-                    observed_slot = None;
-                    if !wait_for_change {
-                        return;
-                    }
-                    if !transient_logged {
-                        if let Some(value) = raw_value {
-                            eprintln!("core: EC slot counter transiently {value:#04x}, waiting for it to settle");
-                        }
-                        transient_logged = true;
-                    }
-                }
-            }
-
-            if read_count >= SLOT_POLL_MAX_READS {
+            if first_value.is_some() {
                 break;
             }
             thread::sleep(Duration::from_millis(SLOT_POLL_INTERVAL_MS));
         }
-
-        let Some(new_slot) = observed_slot else {
-            return; // The counter never settled within the poll budget.
+        let Some(first_value) = first_value else {
+            return; // Unreadable for the whole budget.
         };
-        if Some(new_slot) == previous_slot {
+
+        // Wait for the counter to move off the first reading.
+        let mut settled_value = first_value;
+        while read_count < SLOT_POLL_MAX_READS {
+            thread::sleep(Duration::from_millis(SLOT_POLL_INTERVAL_MS));
+            let raw_value = self.read_slot_once();
+            read_count += 1;
+            let Some(value) = raw_value else {
+                continue;
+            };
+            settled_value = value;
+            if value != first_value {
+                break;
+            }
+        }
+
+        if !is_settled_slot_value(settled_value) {
+            // Mid-switch transient at budget end; the next event retries.
+            eprintln!("core: EC slot counter did not settle (last read {settled_value:#04x})");
+            return;
+        }
+
+        let new_slot = settled_value;
+        if Some(new_slot) == self.hardware_slot {
             return;
         }
 
