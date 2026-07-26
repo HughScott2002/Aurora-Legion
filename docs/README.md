@@ -44,11 +44,7 @@ and a working Fn+Space cycle.
 - [Fn+Space synchronization](explanation/fn-space-sync.md): why Aurora
   counts WMI events instead of polling the EC profile counter.
 
-## Research and design records
+## Research
 
 - [ITE 8295 hardware profiles](research/ite8295-hardware-profiles.md):
   sources, experiments and remaining unknowns.
-- [Design records](superpowers/specs/): approved decisions that shape
-  future work.
-- [Implementation plans](superpowers/plans/): task records for planned
-  changes.
