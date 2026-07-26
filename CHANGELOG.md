@@ -6,15 +6,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-07-26
+
 ### Added
 
-- Fn+Space hardware profile sync: the daemon listens for the Fn+Space
-  firmware event, remembers one Aurora profile per hardware slot, and
-  re-applies the remembered profile of the slot you switch to. Turning
-  the backlight off with Fn+Space is respected (the daemon stops
-  writing until the next change). The active slot is reported as
-  `hardware_slot` in the daemon state, by `aurora status`, and as a
-  caption under the keyboard preview in the app (#14).
+- Fn+Space hardware profile sync. Aurora remembers one profile for each
+  of three lighting slots, with missing slots starting red, green, and
+  blue. The off state stops writes until the next switch. Daemon state,
+  `aurora status`, and the app show the active slot (#14).
+- A Diátaxis documentation index with focused install, build,
+  troubleshooting, Fn+Space, CLI, runtime, architecture, and hardware
+  sync pages.
+
+### Fixed
+
+- Rapid Fn+Space taps now land on the final requested slot instead of
+  skipping slots, going dark, or falling back to firmware RGB.
+- Hardware profiles now reach the controller in one complete feature
+  report, avoiding stale intermediate colors and effects.
 
 ## [0.22.0] - 2026-07-21
 
@@ -50,6 +59,7 @@ the point versioning started.
   IdeaPad, and LOQ laptops, via the driver from
   [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB).
 
-[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/HughScott2002/Aurora-Legion/releases/tag/v0.21.0

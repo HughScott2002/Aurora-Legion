@@ -20,7 +20,7 @@ In another terminal, check the state:
 
 ```console
 $ nix run github:HughScott2002/Aurora-Legion#daemon -- status
-daemon:   running (v0.22.0)
+daemon:   running (v0.23.0)
 keyboard: connected
 ```
 

@@ -18,7 +18,7 @@ Existing settings keep their saved colors.
 
 ```console
 $ aurora status
-daemon:   running (v0.22.0)
+daemon:   running (v0.23.0)
 keyboard: connected
 hw slot:  1 of 3
 ```

@@ -202,7 +202,7 @@ mod tests {
                 ..Profile::default()
             }],
             custom_effects: Vec::new(),
-            version: "0.22.0".to_string(),
+            version: "0.23.0".to_string(),
             hardware_slot: Some(2),
         }
     }
@@ -256,7 +256,7 @@ mod tests {
             id: 1,
             resp: Response::Hello {
                 protocol_version: PROTOCOL_VERSION,
-                daemon_version: "0.22.0".to_string(),
+                daemon_version: "0.23.0".to_string(),
             },
         };
 

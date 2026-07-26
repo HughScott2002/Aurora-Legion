@@ -76,7 +76,7 @@ Handshake: send `Hello` first on every new connection.
 
 ```json
 {"id": 1, "req": {"type": "Hello", "protocol_version": 1}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 1, "daemon_version": "0.22.0"}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 1, "daemon_version": "0.23.0"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
@@ -170,7 +170,7 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [ Profile, ... ],
   "custom_effects": [ CustomEffect, ... ],
-  "version": "0.22.0",
+  "version": "0.23.0",
   "hardware_slot": 2
 }
 ```
@@ -304,7 +304,7 @@ protocol, but hardware effects survive a daemon stop.
 
 ```text
 C: {"id":1,"req":{"type":"Hello","protocol_version":1}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":1,"daemon_version":"0.22.0"}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":1,"daemon_version":"0.23.0"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}
