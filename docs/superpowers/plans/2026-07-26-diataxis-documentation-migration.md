@@ -70,7 +70,9 @@ Run:
 
 ```bash
 git diff --check
-/var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en README.md docs/README.md
+for file in README.md docs/README.md; do
+  /var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en "$file"
+done
 ```
 
 Expected: both commands exit 0.
@@ -169,7 +171,9 @@ Run:
 
 ```bash
 git diff --check
-/var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en docs/quick-start.md docs/install-with-ai.md docs/how-to/*.md
+for file in docs/quick-start.md docs/install-with-ai.md docs/how-to/*.md; do
+  /var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en "$file"
+done
 ```
 
 Expected: both commands exit 0.
@@ -258,7 +262,9 @@ Run:
 
 ```bash
 git diff --check
-/var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en CONTRIBUTING.md docs/protocol.md docs/measurements.md docs/style-guide.md docs/reference/*.md docs/explanation/*.md
+for file in CONTRIBUTING.md docs/protocol.md docs/measurements.md docs/style-guide.md docs/reference/*.md docs/explanation/*.md; do
+  /var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en "$file"
+done
 ```
 
 Expected: both commands exit 0.
@@ -295,7 +301,9 @@ Expected: zero missing local targets.
 Run:
 
 ```bash
-/var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en README.md CONTRIBUTING.md docs/README.md docs/quick-start.md docs/install-with-ai.md docs/how-to/*.md docs/reference/*.md docs/explanation/*.md docs/protocol.md docs/measurements.md docs/style-guide.md
+for file in README.md CONTRIBUTING.md docs/README.md docs/quick-start.md docs/install-with-ai.md docs/how-to/*.md docs/reference/*.md docs/explanation/*.md docs/protocol.md docs/measurements.md docs/style-guide.md; do
+  /var/lib/community-skills/waza/skills/write/scripts/check-punctuation.sh --lang en "$file"
+done
 git diff dev...HEAD --check
 ```
 
