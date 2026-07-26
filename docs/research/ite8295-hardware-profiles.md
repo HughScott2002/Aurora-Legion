@@ -322,7 +322,9 @@ extend or correct the sourced claims above.
   sometimes fails outright (generic libusb error) and sometimes returns
   values outside 1..=4. Both are transient; treat reads as best-effort
   and re-poll instead of treating either as a device failure.
-- The observed cycle on this unit is slot 2, slot 3, off (4). Slot 1
-  never appears; the EC seems to use two lit slots plus off on this
-  model, so "three on-profiles plus off" is not universal. Code should
-  accept any counter value 1..=4 without assuming which ones occur.
+- All four counter states occur on this unit: slots 1, 2, 3 and off
+  (4), confirming three on-profiles plus off. Rapid Fn+Space presses
+  can make a poll-based observer skip an intermediate slot (two events
+  queue, the second read already sees the newest slot); the final state
+  is still correct, but do not conclude a slot is unused from a short
+  trace.
