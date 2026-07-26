@@ -306,3 +306,23 @@ daemon should re-apply saved state at startup and after resume, since
 boot-time EC restoration will otherwise override it
 ([4JX issue #106](https://github.com/4JX/L5P-Keyboard-RGB/issues/106),
 [LLT PowerStateListener.cs](https://github.com/BartoszCichecki/LenovoLegionToolkit/blob/master/LenovoLegionToolkit.Lib/Listeners/PowerStateListener.cs)).
+
+## Live findings on a 2023 Pro (048d:c985), 2026-07-25
+
+Observed while building Aurora's slot sync against real hardware; these
+extend or correct the sourced claims above.
+
+- The GET_FEATURE readback and the netlink event chain both work as
+  documented: family "acpi_event", group "acpi_mc_group", class "wmi",
+  bus id "PNP0C14:01", type 0xE600, joinable without privileges.
+- With hidapi's libusb backend the HID interface can be claimed once:
+  a second `open_device` on the same controller fails while the first
+  handle is held. A reader must share the writer's handle.
+- The counter is not always readable or settled. Mid-switch, GET_FEATURE
+  sometimes fails outright (generic libusb error) and sometimes returns
+  values outside 1..=4. Both are transient; treat reads as best-effort
+  and re-poll instead of treating either as a device failure.
+- The observed cycle on this unit is slot 2, slot 3, off (4). Slot 1
+  never appears; the EC seems to use two lit slots plus off on this
+  model, so "three on-profiles plus off" is not universal. Code should
+  accept any counter value 1..=4 without assuming which ones occur.

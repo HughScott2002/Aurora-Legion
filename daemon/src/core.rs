@@ -90,6 +90,9 @@ pub struct Core {
     /// Last observed EC slot: 1..=3, HARDWARE_SLOT_OFF, or None when
     /// unknown (no keyboard, or the counter is unreadable).
     hardware_slot: Option<u8>,
+    /// True while slot reads are erroring, so the log gets one line per
+    /// failure streak instead of one per tick.
+    slot_read_failing: bool,
 
     subscribers: Vec<Sender<Outbound>>,
 
@@ -118,6 +121,7 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         stop_signals: StopSignals::new(),
         slot_reader: None,
         hardware_slot: None,
+        slot_read_failing: false,
         subscribers: Vec::new(),
         settings_dirty: false,
         last_change_at: Instant::now(),
@@ -172,6 +176,7 @@ impl Core {
         self.stop_signals = StopSignals::new();
         self.slot_reader = None;
         self.hardware_slot = None;
+        self.slot_read_failing = false;
         self.keyboard_status = KeyboardStatus::Searching;
         self.acquire_attempt_count = 0;
         self.next_acquire_at = Instant::now();
@@ -192,14 +197,19 @@ impl Core {
 
         match outcome {
             AcquireOutcome::Acquired(keyboard) => {
+                // The reader shares the keyboard's HID handle; take it
+                // before the keyboard moves into the engine.
+                self.slot_reader = Some(keyboard.slot_reader());
                 let engine = EffectManager::new(*keyboard, self.stop_signals.clone());
                 self.engine = Some(engine);
                 self.keyboard_status = KeyboardStatus::Connected;
                 self.custom_effect_playing = None;
                 // Learn which EC slot the keyboard is on BEFORE writing
                 // anything, so the right slot's profile is applied and no
-                // slot's memory is overwritten by a stale live profile.
-                self.acquire_slot_reader();
+                // slot's memory is overwritten by a stale live profile. A
+                // transient counter value reads as "unknown".
+                let raw_slot = self.read_slot_once();
+                self.hardware_slot = raw_slot.filter(|value| is_settled_slot_value(*value));
                 self.apply_profile_for_acquired_slot();
                 self.broadcast_state();
             }
@@ -488,25 +498,6 @@ impl Core {
 
     // --- Hardware slots (Fn+Space) ---------------------------------------
 
-    /// Open the read-only slot handle and learn which EC slot the keyboard
-    /// is on. Failure disables slot tracking until the next acquisition; the
-    /// rest of the daemon is unaffected.
-    fn acquire_slot_reader(&mut self) {
-        match legion_rgb_driver::open_slot_reader() {
-            Ok(reader) => {
-                self.slot_reader = Some(reader);
-            }
-            Err(error) => {
-                eprintln!("core: hardware slot tracking disabled, could not open reader: {error}");
-                self.slot_reader = None;
-                self.hardware_slot = None;
-                return;
-            }
-        }
-
-        self.hardware_slot = self.read_slot_once();
-    }
-
     /// First write after acquisition. Respect what the EC is showing: a
     /// known lighting slot applies that slot's remembered profile, off
     /// writes nothing, and an unknown slot (no reader) falls back to the
@@ -547,17 +538,24 @@ impl Core {
             return None;
         };
 
-        match reader.read_slot_index() {
-            Ok(slot_index) => Some(slot_index),
+        // Any error is treated as transient and the reading skipped: the
+        // controller STALLs GET_FEATURE while the EC is mid-switch
+        // (observed live on a 2023 Pro). Device health is the engine's
+        // call; a dead device fails the engine's writes, which rebuilds
+        // everything including this reader.
+        match reader.read_slot_counter() {
+            Ok(counter_value) => {
+                if self.slot_read_failing {
+                    self.slot_read_failing = false;
+                    eprintln!("core: hardware slot reads recovered");
+                }
+                Some(counter_value)
+            }
             Err(error) => {
-                // Do not retry every tick against a device that cannot
-                // answer; tracking comes back on the next acquisition. The
-                // stale slot is cleared so clients see "unknown", not a
-                // slot the EC may have long left.
-                eprintln!("core: hardware slot read failed, slot tracking disabled: {error}");
-                self.slot_reader = None;
-                self.hardware_slot = None;
-                self.broadcast_state();
+                if !self.slot_read_failing {
+                    self.slot_read_failing = true;
+                    eprintln!("core: hardware slot read failed, will keep trying: {error}");
+                }
                 None
             }
         }
@@ -577,22 +575,41 @@ impl Core {
         }
 
         let previous_slot = self.hardware_slot;
-        let mut observed_slot: Option<u8>;
+        let mut observed_slot: Option<u8> = None;
         let mut read_count: u32 = 0;
+        let mut transient_logged = false;
 
         loop {
-            observed_slot = self.read_slot_once();
-            if observed_slot.is_none() {
-                return; // Read failed; tracking is now disabled.
-            }
+            let raw_value = self.read_slot_once();
             read_count += 1;
 
-            if !wait_for_change {
-                break;
+            match raw_value {
+                Some(value) if is_settled_slot_value(value) => {
+                    observed_slot = Some(value);
+                    if !wait_for_change {
+                        break;
+                    }
+                    if observed_slot != previous_slot {
+                        break;
+                    }
+                }
+                _ => {
+                    // The EC reports values outside 1..=4 while it is
+                    // mid-switch (observed live); not a slot, keep polling
+                    // on the event path and skip on the tick path.
+                    observed_slot = None;
+                    if !wait_for_change {
+                        return;
+                    }
+                    if !transient_logged {
+                        if let Some(value) = raw_value {
+                            eprintln!("core: EC slot counter transiently {value:#04x}, waiting for it to settle");
+                        }
+                        transient_logged = true;
+                    }
+                }
             }
-            if observed_slot != previous_slot {
-                break;
-            }
+
             if read_count >= SLOT_POLL_MAX_READS {
                 break;
             }
@@ -600,7 +617,7 @@ impl Core {
         }
 
         let Some(new_slot) = observed_slot else {
-            return;
+            return; // The counter never settled within the poll budget.
         };
         if Some(new_slot) == previous_slot {
             return;
@@ -719,6 +736,12 @@ impl Core {
         self.settings.current_profile = self.current_profile.clone();
         self.settings.save();
     }
+}
+
+/// The counter values the EC settles on: a lighting slot or off. Anything
+/// else is a mid-switch transient reading.
+fn is_settled_slot_value(value: u8) -> bool {
+    HARDWARE_SLOT_RANGE.contains(&value) || value == HARDWARE_SLOT_OFF
 }
 
 /// Returns `Some(error response)` when the profile is out of range.
