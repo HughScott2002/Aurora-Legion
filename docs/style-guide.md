@@ -1,7 +1,7 @@
 # Style guide
 
-The long-form rules behind the invariants in [AGENTS.md](../AGENTS.md).
-Read this before writing or reviewing Rust or GTK code in this repo.
+These rules expand [AGENTS.md](../AGENTS.md). Read them before changing
+Rust, GTK or documentation.
 
 ## TigerStyle, adapted to Rust
 
@@ -47,3 +47,12 @@ Based on [TigerBeetle's TIGER_STYLE](https://github.com/tigerbeetle/tigerbeetle/
   against signal echo loops.
 - Long-running work (systemctl calls, file IO) never runs on the GTK
   main loop; spawn a thread and deliver results as messages.
+
+## Documentation rules
+
+- Give each page one job: tutorial, how-to, reference or explanation.
+- Treat every reader as important. Cut every word that does not help
+  them act or understand.
+- Keep commands runnable and claims linked to evidence.
+- Link to a canonical fact instead of copying it into another page.
+- Use direct verbs, short paragraphs and no em dashes.
