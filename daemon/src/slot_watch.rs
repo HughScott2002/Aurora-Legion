@@ -2,7 +2,7 @@
 //!
 //! Pressing Fn+Space makes the EC cycle its hardware lighting slot and
 //! raise the Lenovo GameZone "light profile change" WMI event. No kernel
-//! driver consumes that event, but the WMI core forwards every WMI event
+//! driver consumes the event, but the WMI core forwards every WMI event
 //! to the ACPI generic-netlink multicast group, so a userspace listener
 //! sees it as an `acpi_genl_event` with device class `"wmi"` and event
 //! type 0xE600 (the DSDT's `Notify` value 0xE6 as packed by the kernel).
@@ -101,6 +101,9 @@ pub fn spawn(command_tx: Sender<Command>) {
                 continue;
             }
 
+            // Do not time-debounce this event. Confirmed physical taps can
+            // arrive 140 ms apart; dropping one leaves the firmware's own
+            // slot profile visible instead of Aurora's logical slot.
             let send_result = command_tx.send(Command::HardwareSlotEvent);
             if send_result.is_err() {
                 return; // Core is gone; daemon is shutting down.

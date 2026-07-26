@@ -168,16 +168,31 @@ impl Inner {
         self.stop_signals.store_false();
         let mut rng = rng();
 
-        if profile.effect.is_built_in() {
+        let hardware_effect = match profile.effect {
+            Effects::Static => Some(BaseEffects::Static),
+            Effects::Breath => Some(BaseEffects::Breath),
+            Effects::Smooth => Some(BaseEffects::Smooth),
+            Effects::Wave => match profile.direction {
+                Direction::Left => Some(BaseEffects::LeftWave),
+                Direction::Right => Some(BaseEffects::RightWave),
+            },
+            _ => None,
+        };
+
+        if let Some(hardware_effect) = hardware_effect {
             let clamped_speed = clamp_hardware_speed(profile.speed);
-            if !self.write_speed(clamped_speed) {
+            let brightness_payload = profile.brightness as u8 + 1;
+            let colors = profile.rgb_array();
+            if !self.write_hardware_profile(hardware_effect, clamped_speed, brightness_payload, colors) {
                 return;
             }
-        } else {
-            // All software effects rely on rapidly switching a static color.
-            if !self.write_effect(BaseEffects::Static) {
-                return;
-            }
+            self.stop_signals.store_false();
+            return;
+        }
+
+        // All software effects rely on rapidly switching a static color.
+        if !self.write_effect(BaseEffects::Static) {
+            return;
         }
 
         let brightness_payload = profile.brightness as u8 + 1;
@@ -283,12 +298,18 @@ impl Inner {
         }
     }
 
-    fn write_speed(&mut self, speed: u8) -> bool {
+    fn write_hardware_profile(
+        &mut self,
+        effect: BaseEffects,
+        speed: u8,
+        brightness: u8,
+        colors: [u8; COLOR_BYTE_COUNT],
+    ) -> bool {
         debug_assert!(SPEED_RANGE.contains(&speed));
-        match self.keyboard.set_speed(speed) {
+        match self.keyboard.apply_hardware_profile(effect, speed, brightness, colors) {
             Ok(()) => true,
             Err(error) => {
-                self.record_device_error("set_speed", &error);
+                self.record_device_error("apply_hardware_profile", &error);
                 false
             }
         }

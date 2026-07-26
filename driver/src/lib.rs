@@ -59,6 +59,58 @@ pub struct LightingState {
     rgb_values: [u8; 12],
 }
 
+impl LightingState {
+    fn build_payload(&self) -> Result<[u8; FEATURE_REPORT_BYTES]> {
+        if !SPEED_RANGE.contains(&self.speed) {
+            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+        }
+        if !BRIGHTNESS_RANGE.contains(&self.brightness) {
+            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+        }
+
+        let mut payload: [u8; FEATURE_REPORT_BYTES] = [0; FEATURE_REPORT_BYTES];
+        payload[0] = FEATURE_REPORT_ID;
+        payload[1] = 0x16;
+        payload[2] = match self.effect_type {
+            BaseEffects::Static => 0x01,
+            BaseEffects::Breath => 0x03,
+            BaseEffects::Smooth => 0x06,
+            BaseEffects::LeftWave => {
+                payload[19] = 0x1;
+                0x04
+            }
+            BaseEffects::RightWave => {
+                payload[18] = 0x1;
+                0x04
+            }
+        };
+
+        payload[3] = self.speed;
+        payload[4] = self.brightness;
+
+        if let BaseEffects::Static | BaseEffects::Breath = self.effect_type {
+            payload[5..17].copy_from_slice(&self.rgb_values);
+        };
+
+        Ok(payload)
+    }
+
+    fn replace_profile(&mut self, effect: BaseEffects, speed: u8, brightness: u8, rgb_values: [u8; 12]) -> Result<()> {
+        if !SPEED_RANGE.contains(&speed) {
+            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+        }
+        if !BRIGHTNESS_RANGE.contains(&brightness) {
+            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+        }
+
+        self.effect_type = effect;
+        self.speed = speed;
+        self.brightness = brightness;
+        self.rgb_values = rgb_values;
+        Ok(())
+    }
+}
+
 /// The one open handle to the controller. Shared between the effect
 /// engine (writes) and the daemon core's [`SlotReader`] (reads): with the
 /// libusb backend the HID interface can only be claimed once, so a second
@@ -84,45 +136,8 @@ pub struct Keyboard {
 
 #[allow(dead_code)]
 impl Keyboard {
-    fn build_payload(&self) -> Result<[u8; 33]> {
-        let keyboard_state = &self.current_state;
-
-        if !SPEED_RANGE.contains(&keyboard_state.speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
-        }
-        if !BRIGHTNESS_RANGE.contains(&keyboard_state.brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
-        }
-
-        let mut payload: [u8; 33] = [0; 33];
-        payload[0] = 0xcc;
-        payload[1] = 0x16;
-        payload[2] = match keyboard_state.effect_type {
-            BaseEffects::Static => 0x01,
-            BaseEffects::Breath => 0x03,
-            BaseEffects::Smooth => 0x06,
-            BaseEffects::LeftWave => {
-                payload[19] = 0x1;
-                0x04
-            }
-            BaseEffects::RightWave => {
-                payload[18] = 0x1;
-                0x04
-            }
-        };
-
-        payload[3] = keyboard_state.speed;
-        payload[4] = keyboard_state.brightness;
-
-        if let BaseEffects::Static | BaseEffects::Breath = keyboard_state.effect_type {
-            payload[5..(12 + 5)].copy_from_slice(&keyboard_state.rgb_values[..12]);
-        };
-
-        Ok(payload)
-    }
-
     pub fn refresh(&mut self) -> Result<()> {
-        let payload = self.build_payload()?;
+        let payload = self.current_state.build_payload()?;
 
         // Propagate instead of unwrapping: this is the call that fails when
         // the keyboard is unplugged, and callers need to see that error.
@@ -130,6 +145,20 @@ impl Keyboard {
         device.send_feature_report(&payload)?;
 
         Ok(())
+    }
+
+    /// Replace every hardware-effect field and send one complete feature
+    /// report. Callers avoid replaying stale colors while setting speed,
+    /// brightness, and effect separately.
+    pub fn apply_hardware_profile(
+        &mut self,
+        effect: BaseEffects,
+        speed: u8,
+        brightness: u8,
+        rgb_values: [u8; 12],
+    ) -> Result<()> {
+        self.current_state.replace_profile(effect, speed, brightness, rgb_values)?;
+        self.refresh()
     }
 
     /// A read handle onto this keyboard's shared HID device, for the EC
@@ -299,13 +328,12 @@ pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
         rgb_values: [0; 12],
     };
 
-    let mut keyboard = Keyboard {
+    let keyboard = Keyboard {
         keyboard_hid,
         current_state,
         stop_signal,
     };
 
-    keyboard.refresh()?;
     Ok(keyboard)
 }
 
@@ -320,4 +348,29 @@ pub fn find_possible_keyboards() -> Result<Vec<String>> {
 
     list.dedup();
     Ok(list)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_profile_replaces_every_payload_field() {
+        let mut state = LightingState {
+            effect_type: BaseEffects::Static,
+            speed: 1,
+            brightness: 1,
+            rgb_values: [0; 12],
+        };
+        let colors = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+        let replace_result = state.replace_profile(BaseEffects::Breath, 4, 2, colors);
+        assert!(replace_result.is_ok());
+
+        let payload = match state.build_payload() {
+            Ok(payload) => payload,
+            Err(error) => panic!("complete profile should build: {error}"),
+        };
+        assert_eq!(&payload[..17], &[0xcc, 0x16, 0x03, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    }
 }

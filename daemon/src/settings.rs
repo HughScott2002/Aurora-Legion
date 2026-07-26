@@ -11,7 +11,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use aurora_protocol::{custom_effect::CustomEffect, profile::Profile};
+use aurora_protocol::{
+    custom_effect::CustomEffect,
+    ipc::HARDWARE_SLOT_COUNT,
+    profile::Profile,
+};
 use serde::{Deserialize, Serialize};
 
 pub const CONFIG_DIR_NAME: &str = "aurora";
@@ -21,6 +25,12 @@ pub const SETTINGS_FILE_NAME: &str = "settings.json";
 /// (never written) during migration.
 const PRE_RENAME_CONFIG_DIR_NAME: &str = "legion-kb-rgb";
 
+const HARDWARE_SLOT_DEFAULT_COLORS: [[u8; 3]; HARDWARE_SLOT_COUNT as usize] = [
+    [255, 0, 0],
+    [0, 255, 0],
+    [0, 0, 255],
+];
+
 /// Same serde shape as the old app's `persist::Settings`, so a migrated file
 /// parses without conversion. `effects` keeps its historical name.
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -29,9 +39,9 @@ pub struct Settings {
     pub effects: Vec<CustomEffect>,
     #[serde(alias = "ui_state")]
     pub current_profile: Profile,
-    /// One remembered profile per EC hardware slot (the ones Fn+Space
-    /// cycles); index 0 is slot 1. Files from before this feature lack the
-    /// field; `normalize_hardware_slots` pads it after load.
+    /// One remembered profile per Aurora Fn+Space slot; index 0 is slot 1.
+    /// Files from before this feature lack the field;
+    /// `normalize_hardware_slots` pads it after load.
     #[serde(default)]
     pub hardware_slot_profiles: Vec<Profile>,
 }
@@ -101,14 +111,22 @@ impl Settings {
         self.save_to(&path);
     }
 
-    /// Ensure exactly `slot_count` hardware slot profiles exist. Missing
-    /// entries are seeded from `seed` (the profile the keyboard is showing)
-    /// so an untouched slot re-applies familiar lighting instead of black.
-    pub fn normalize_hardware_slots(&mut self, slot_count: usize, seed: &Profile) {
-        while self.hardware_slot_profiles.len() < slot_count {
-            self.hardware_slot_profiles.push(seed.clone());
+    /// Ensure exactly one remembered profile exists per hardware slot.
+    /// Missing slots start as solid red, green, and blue so slot identity is
+    /// visible while cycling with Fn+Space.
+    pub fn normalize_hardware_slots(&mut self) {
+        while self.hardware_slot_profiles.len() < HARDWARE_SLOT_DEFAULT_COLORS.len() {
+            let slot_index = self.hardware_slot_profiles.len();
+            let default_color = HARDWARE_SLOT_DEFAULT_COLORS[slot_index];
+            let mut profile = Profile::default();
+
+            for zone in &mut profile.rgb_zones {
+                zone.rgb = default_color;
+            }
+
+            self.hardware_slot_profiles.push(profile);
         }
-        self.hardware_slot_profiles.truncate(slot_count);
+        self.hardware_slot_profiles.truncate(HARDWARE_SLOT_DEFAULT_COLORS.len());
     }
 
     fn save_to(&self, path: &Path) {
@@ -160,7 +178,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_without_slot_field_parse_and_normalize() {
+    fn missing_slot_profiles_get_visible_defaults() {
         let legacy = r#"{"profiles": [], "effects": [], "current_profile": {
             "name": null,
             "rgb_zones": [
@@ -178,18 +196,27 @@ mod tests {
         let mut settings: Settings = serde_json::from_str(legacy).unwrap();
         assert!(settings.hardware_slot_profiles.is_empty());
 
-        let seed = settings.current_profile.clone();
-        settings.normalize_hardware_slots(3, &seed);
+        settings.normalize_hardware_slots();
         assert_eq!(settings.hardware_slot_profiles.len(), 3);
-        assert_eq!(settings.hardware_slot_profiles[2].rgb_zones[0].rgb, [1, 2, 3]);
+        assert_eq!(
+            settings.hardware_slot_profiles[0].rgb_array(),
+            [255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0]
+        );
+        assert_eq!(
+            settings.hardware_slot_profiles[1].rgb_array(),
+            [0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0]
+        );
+        assert_eq!(
+            settings.hardware_slot_profiles[2].rgb_array(),
+            [0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255]
+        );
     }
 
     #[test]
     fn oversized_slot_list_is_truncated() {
         let mut settings = Settings::default();
-        let seed = Profile::default();
-        settings.normalize_hardware_slots(5, &seed);
-        settings.normalize_hardware_slots(3, &seed);
+        settings.hardware_slot_profiles = vec![Profile::default(); 5];
+        settings.normalize_hardware_slots();
         assert_eq!(settings.hardware_slot_profiles.len(), 3);
     }
 }

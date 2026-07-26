@@ -1,8 +1,8 @@
 //! Diagnostic for the EC slot counter. Two modes:
 //!
-//! - `cargo run -p legion-rgb-driver --example slot_probe poll` — read the
+//! - `cargo run -p legion-rgb-driver --example slot_probe poll`: read the
 //!   counter every 50 ms for 8 seconds, printing every change. No writes.
-//! - `... slot_probe write` — read the counter, send ONE static-color
+//! - `... slot_probe write`: read the counter, send ONE static-color
 //!   feature report (the same 0xCC 0x16 payload the daemon sends), then
 //!   keep reading for 4 seconds to see whether the write moved the counter.
 //!

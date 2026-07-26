@@ -327,12 +327,24 @@ extend or correct the sourced claims above.
   sometimes fails outright (generic libusb error) and sometimes returns
   values outside 1..=4. Both are transient; treat reads as best-effort
   and re-poll instead of treating either as a device failure.
+- Value 0 is not always transient. One Fn+Space tap from off left the
+  counter at 0 for more than 20 seconds with the backlight dark. One
+  static feature report recovered it immediately from 0 to 3.
 - All four counter states occur on this unit: slots 1, 2, 3 and off
   (4), confirming three on-profiles plus off. Rapid Fn+Space presses
   can make a poll-based observer skip an intermediate slot (two events
   queue, the second read already sees the newest slot); the final state
   is still correct, but do not conclude a slot is unused from a short
   trace.
+- Each matching WMI notification represented one physical tap on this
+  unit. Confirmed taps arrived only 140 ms apart. A 250 ms time debounce
+  discarded the second tap and left the firmware's RGB wave visible, so
+  the listener must forward every matching event.
+- A 100 ms sleep and write for every event was still racy under a long
+  burst. Aurora's final red report completed successfully, then the EC
+  finished its transition and left the keyboard dark. Count every event,
+  reset one settle deadline, and apply only the final logical slot after
+  the input has been quiet.
 - **The counter cannot be watched passively.** A software `0xCC 0x16`
   write MOVES the counter (one static write flipped a stable
   reading from 4 to 3) and does NOT fire the WMI event (0 events on
@@ -342,5 +354,8 @@ extend or correct the sourced claims above.
   apply again, forever. The loop stays invisible while every slot
   holds identical contents (the counter appears to keep matching) and
   starts the moment slot profiles differ. Detection must be anchored
-  to the WMI event, and the post-press value must be compared against
-  a fresh read taken at event time, not against remembered state.
+  to the WMI event. An Aurora-owned profile sequence must advance from
+  that event instead of treating later counter values as slot identity.
+- Apply one complete hardware profile in one feature report. Sending
+  speed, brightness, colors, and effect as separate full reports replays
+  stale intermediate states and moves the counter once per field.

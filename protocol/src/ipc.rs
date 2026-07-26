@@ -25,8 +25,8 @@ pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// see `docs/protocol.md` for the negotiation rules.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Number of EC hardware lighting slots: `DaemonState::hardware_slot` is
-/// 1 to this value while a slot is lit. Fn+Space cycles them.
+/// Number of Aurora lighting slots selected through Fn+Space:
+/// `DaemonState::hardware_slot` is 1 to this value while a slot is lit.
 pub const HARDWARE_SLOT_COUNT: u8 = 3;
 
 /// `DaemonState::hardware_slot` value while the backlight is off.
@@ -174,9 +174,11 @@ pub struct DaemonState {
     pub custom_effects: Vec<CustomEffect>,
     /// Daemon package version, so clients can spot mismatches.
     pub version: String,
-    /// The EC hardware slot the keyboard is on (Fn+Space cycles it):
-    /// 1 to 3 for the stored lighting slots, 4 while the backlight is off,
-    /// `null` when unknown (no keyboard, or the slot cannot be read).
+    /// Aurora's logical Fn+Space slot: 1 to 3 for remembered lighting
+    /// profiles, 4 while Aurora holds the backlight off, `null` when no
+    /// keyboard slot is active. The daemon reads the EC counter once at
+    /// acquisition, then advances this value from WMI events because its
+    /// own lighting writes invalidate later counter reads.
     /// Additive field; absent on older daemons.
     #[serde(default)]
     pub hardware_slot: Option<u8>,
