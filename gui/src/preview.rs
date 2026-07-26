@@ -25,9 +25,13 @@ impl KeyboardPreview {
     pub fn new() -> Self {
         let zone_colors: Rc<Cell<[[u8; 3]; ZONE_COUNT]>> = Rc::new(Cell::new([[0; 3]; ZONE_COUNT]));
 
-        let drawing_area = gtk::DrawingArea::new();
-        drawing_area.set_content_height(PREVIEW_HEIGHT_PX);
-        drawing_area.set_hexpand(true);
+        // Presentation role: the preview is decorative; the zone color
+        // buttons below carry the same information accessibly.
+        let drawing_area = gtk::DrawingArea::builder()
+            .content_height(PREVIEW_HEIGHT_PX)
+            .hexpand(true)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
 
         let colors_for_draw = zone_colors.clone();
         drawing_area.set_draw_func(move |_area, context, width, height| {

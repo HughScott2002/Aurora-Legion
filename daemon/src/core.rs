@@ -16,6 +16,7 @@ use aurora_protocol::{
     ipc::{DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus, Request, Response, ResponseEnvelope},
     profile::Profile,
 };
+use legion_rgb_driver::{HARDWARE_SLOT_OFF, HARDWARE_SLOT_RANGE};
 
 use crate::{
     engine::{EffectManager, StopSignals, SOFTWARE_SPEED_RANGE},
@@ -40,6 +41,12 @@ const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
 /// settings file and every state broadcast with it.
 const MAX_CUSTOM_EFFECT_STEPS: usize = 4096;
 
+/// Apply the final logical slot only after Fn+Space input has been quiet
+/// long enough for the EC's native transition to finish. Every event still
+/// advances the logical slot; only redundant intermediate writes are
+/// coalesced.
+const HARDWARE_SLOT_SETTLE_DELAY: Duration = Duration::from_millis(250);
+
 /// Commands the core accepts. Keep this the only way to mutate daemon state.
 pub enum Command {
     Ipc {
@@ -48,6 +55,9 @@ pub enum Command {
         out_tx: Sender<Outbound>,
     },
     CycleProfile,
+    /// The Fn+Space "light profile change" WMI event fired; sent by the
+    /// slot watcher thread. The core advances Aurora's logical slot once.
+    HardwareSlotEvent,
     /// SIGTERM/SIGINT arrived; sent by the signal listener thread so the
     /// core wakes immediately instead of on its next tick.
     ShutdownSignal,
@@ -70,6 +80,14 @@ pub struct Core {
     engine: Option<EffectManager>,
     stop_signals: StopSignals,
 
+    /// Aurora's logical slot: 1..=3, HARDWARE_SLOT_OFF, or None while no
+    /// keyboard slot is active. The EC counter is not trusted after
+    /// Aurora's first write because writes move it without a WMI event.
+    hardware_slot: Option<u8>,
+    /// Deadline for applying the final logical slot after an Fn+Space
+    /// burst. A later event replaces this deadline.
+    hardware_slot_apply_at: Option<Instant>,
+
     subscribers: Vec<Sender<Outbound>>,
 
     settings_dirty: bool,
@@ -82,8 +100,10 @@ pub struct Core {
 }
 
 pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
-    let settings = Settings::load_or_migrate();
+    let mut settings = Settings::load_or_migrate();
     let current_profile = settings.current_profile.clone();
+
+    settings.normalize_hardware_slots();
 
     let mut core = Core {
         settings,
@@ -92,6 +112,8 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         keyboard_status: KeyboardStatus::Searching,
         engine: None,
         stop_signals: StopSignals::new(),
+        hardware_slot: None,
+        hardware_slot_apply_at: None,
         subscribers: Vec::new(),
         settings_dirty: false,
         last_change_at: Instant::now(),
@@ -114,6 +136,7 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
 
+        core.apply_hardware_slot_if_due();
         core.save_settings_if_due();
     }
 
@@ -139,6 +162,8 @@ impl Core {
         }
 
         self.stop_signals = StopSignals::new();
+        self.hardware_slot = None;
+        self.hardware_slot_apply_at = None;
         self.keyboard_status = KeyboardStatus::Searching;
         self.acquire_attempt_count = 0;
         self.next_acquire_at = Instant::now();
@@ -159,12 +184,36 @@ impl Core {
 
         match outcome {
             AcquireOutcome::Acquired(keyboard) => {
-                eprintln!("core: keyboard acquired, applying current profile");
+                // This is the only trusted counter read. It must happen
+                // before the keyboard moves into the engine and before
+                // Aurora sends its first lighting report.
+                let slot_read_result = keyboard.slot_reader().read_slot_counter();
+                let initial_slot = match slot_read_result {
+                    Ok(value) if is_settled_slot_value(value) => Some(value),
+                    Ok(value) => {
+                        let fallback_slot = *HARDWARE_SLOT_RANGE.start();
+                        eprintln!(
+                            "core: startup slot counter was not settled ({value:#04x}), \
+                             falling back to slot {fallback_slot}"
+                        );
+                        Some(fallback_slot)
+                    }
+                    Err(error) => {
+                        let fallback_slot = *HARDWARE_SLOT_RANGE.start();
+                        eprintln!(
+                            "core: startup slot counter read failed ({error}), \
+                             falling back to slot {fallback_slot}"
+                        );
+                        Some(fallback_slot)
+                    }
+                };
+
                 let engine = EffectManager::new(*keyboard, self.stop_signals.clone());
-                engine.set_profile(self.current_profile.clone());
                 self.engine = Some(engine);
                 self.keyboard_status = KeyboardStatus::Connected;
                 self.custom_effect_playing = None;
+                self.hardware_slot = initial_slot;
+                self.apply_profile_for_acquired_slot();
                 self.broadcast_state();
             }
             AcquireOutcome::Failed(status) => {
@@ -197,6 +246,9 @@ impl Core {
                     eprintln!("core: hotkey profile cycle failed: {message}");
                 }
             }
+            Command::HardwareSlotEvent => {
+                self.advance_hardware_slot();
+            }
             Command::ShutdownSignal => {
                 self.shutdown_requested = true;
             }
@@ -206,13 +258,20 @@ impl Core {
     /// Slow tick when the keyboard is healthy and nothing is pending; fast
     /// tick while acquiring the keyboard or holding an unsaved change.
     fn next_tick_timeout(&self) -> Duration {
-        if self.settings_dirty {
-            return Duration::from_millis(TICK_BUSY_MS);
+        let mut timeout = if self.settings_dirty || self.engine.is_none() {
+            Duration::from_millis(TICK_BUSY_MS)
+        } else {
+            Duration::from_millis(TICK_IDLE_MS)
+        };
+
+        if let Some(apply_at) = self.hardware_slot_apply_at {
+            let apply_timeout = apply_at.saturating_duration_since(Instant::now());
+            if apply_timeout < timeout {
+                timeout = apply_timeout;
+            }
         }
-        if self.engine.is_none() {
-            return Duration::from_millis(TICK_BUSY_MS);
-        }
-        Duration::from_millis(TICK_IDLE_MS)
+
+        timeout
     }
 
     fn handle_request(&mut self, request: Request, out_tx: &Sender<Outbound>) -> Response {
@@ -259,6 +318,10 @@ impl Core {
         }
     }
 
+    // A client request while the backlight is off (hardware slot 4) is
+    // still applied: an explicit "light the keyboard like this" beats the
+    // remembered off state. It is not stored into any slot; only the
+    // lighting slots 1..=3 remember profiles.
     fn set_profile(&mut self, profile: Profile) -> Response {
         if let Some(rejection) = validate_profile(&profile) {
             return rejection;
@@ -266,10 +329,12 @@ impl Core {
 
         self.current_profile = profile.clone();
         self.custom_effect_playing = None;
+        self.hardware_slot_apply_at = None;
         if let Some(engine) = &self.engine {
             engine.set_profile(profile);
         }
 
+        self.store_current_into_active_slot();
         self.mark_changed();
         self.broadcast_state();
         Response::Ok
@@ -295,6 +360,7 @@ impl Core {
             engine.play_custom_effect(effect);
         }
 
+        self.hardware_slot_apply_at = None;
         self.custom_effect_playing = Some(display_name);
         self.broadcast_state();
         Response::Ok
@@ -302,6 +368,7 @@ impl Core {
 
     fn stop_custom_effect(&mut self) -> Response {
         self.custom_effect_playing = None;
+        self.hardware_slot_apply_at = None;
         if let Some(engine) = &self.engine {
             engine.set_profile(self.current_profile.clone());
         }
@@ -442,6 +509,133 @@ impl Core {
         }
     }
 
+    // --- Hardware slots (Fn+Space) ---------------------------------------
+
+    /// First write after acquisition. Respect what the EC is showing: a
+    /// known lighting slot applies that slot's remembered profile, off
+    /// writes nothing, and an unknown slot (no reader) falls back to the
+    /// last live profile, which is the pre-slot-tracking behavior.
+    ///
+    fn apply_profile_for_acquired_slot(&mut self) {
+        match self.hardware_slot {
+            Some(slot) if HARDWARE_SLOT_RANGE.contains(&slot) => {
+                let slot_position = (slot - 1) as usize;
+                let Some(slot_profile) = self.settings.hardware_slot_profiles.get(slot_position) else {
+                    // Cannot happen after normalize_hardware_slots.
+                    eprintln!("core: no remembered profile for hardware slot {slot}");
+                    return;
+                };
+
+                eprintln!("core: keyboard acquired on hardware slot {slot}, applying its remembered profile");
+                let slot_profile = slot_profile.clone();
+                self.current_profile = slot_profile.clone();
+                if let Some(engine) = &self.engine {
+                    engine.set_profile(slot_profile);
+                }
+                self.mark_changed();
+            }
+            Some(_off) => {
+                eprintln!("core: keyboard acquired with the backlight off, not writing");
+            }
+            None => {
+                eprintln!("core: keyboard acquired, applying current profile");
+                let profile = self.current_profile.clone();
+                if let Some(engine) = &self.engine {
+                    engine.set_profile(profile);
+                }
+            }
+        }
+    }
+
+    /// Aurora owns the visible Fn+Space sequence after startup. The EC
+    /// counter cannot identify later slots because every Aurora lighting
+    /// write can move it without emitting a WMI event.
+    fn advance_hardware_slot(&mut self) {
+        let Some(current_slot) = self.hardware_slot else {
+            eprintln!("core: hardware slot event ignored because startup slot is unknown");
+            return;
+        };
+
+        let event_at = Instant::now();
+        let Some((new_slot, apply_at)) = schedule_hardware_slot_apply(current_slot, event_at) else {
+            eprintln!("core: hardware slot event ignored because slot {current_slot} is invalid");
+            return;
+        };
+
+        self.hardware_slot = Some(new_slot);
+        self.hardware_slot_apply_at = Some(apply_at);
+        self.custom_effect_playing = None;
+
+        if new_slot == HARDWARE_SLOT_OFF {
+            eprintln!("core: hardware backlight off (slot {new_slot}) selected");
+            return;
+        }
+
+        eprintln!("core: hardware slot {new_slot} selected");
+    }
+
+    /// Apply only the final slot in an Fn+Space burst. Waiting outside the
+    /// command handler keeps the core responsive and ensures Aurora writes
+    /// after the EC has finished its last native transition.
+    fn apply_hardware_slot_if_due(&mut self) {
+        let Some(apply_at) = self.hardware_slot_apply_at else {
+            return;
+        };
+        if Instant::now() < apply_at {
+            return;
+        }
+
+        self.hardware_slot_apply_at = None;
+        let Some(slot) = self.hardware_slot else {
+            return;
+        };
+
+        if slot == HARDWARE_SLOT_OFF {
+            eprintln!("core: hardware backlight off (slot {slot}), applying blackout");
+            if let Some(engine) = &self.engine {
+                engine.set_profile(Profile::default());
+            }
+            self.broadcast_state();
+            return;
+        }
+
+        if !HARDWARE_SLOT_RANGE.contains(&slot) {
+            eprintln!("core: pending hardware slot {slot} is invalid");
+            return;
+        }
+
+        let slot_position = (slot - 1) as usize;
+        let Some(slot_profile) = self.settings.hardware_slot_profiles.get(slot_position) else {
+            eprintln!("core: no remembered profile for hardware slot {slot}");
+            return;
+        };
+
+        eprintln!("core: hardware slot {slot} settled, applying its remembered profile");
+        let slot_profile = slot_profile.clone();
+        self.current_profile = slot_profile.clone();
+        if let Some(engine) = &self.engine {
+            engine.set_profile(slot_profile);
+        }
+        self.mark_changed();
+        self.broadcast_state();
+    }
+
+    /// Every lighting change lands in whichever EC slot is active, so the
+    /// slot's remembered profile follows the live profile.
+    fn store_current_into_active_slot(&mut self) {
+        let Some(active_slot) = self.hardware_slot else {
+            return;
+        };
+        if !HARDWARE_SLOT_RANGE.contains(&active_slot) {
+            return; // Off (or unknown) stores nothing.
+        }
+
+        let slot_position = (active_slot - 1) as usize;
+        if let Some(slot_entry) = self.settings.hardware_slot_profiles.get_mut(slot_position) {
+            *slot_entry = self.current_profile.clone();
+        }
+    }
+
     // --- State + persistence ---------------------------------------------
 
     fn state_snapshot(&self) -> DaemonState {
@@ -452,6 +646,7 @@ impl Core {
             profiles: self.settings.profiles.clone(),
             custom_effects: self.settings.effects.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            hardware_slot: self.hardware_slot,
         }
     }
 
@@ -508,6 +703,33 @@ impl Core {
     }
 }
 
+/// The counter values the EC settles on: a lighting slot or off. Anything
+/// else is a mid-switch transient reading.
+fn is_settled_slot_value(value: u8) -> bool {
+    HARDWARE_SLOT_RANGE.contains(&value) || value == HARDWARE_SLOT_OFF
+}
+
+fn next_hardware_slot(current_slot: u8) -> Option<u8> {
+    if HARDWARE_SLOT_RANGE.contains(&current_slot) {
+        if current_slot < *HARDWARE_SLOT_RANGE.end() {
+            return Some(current_slot + 1);
+        }
+        return Some(HARDWARE_SLOT_OFF);
+    }
+
+    if current_slot == HARDWARE_SLOT_OFF {
+        return Some(*HARDWARE_SLOT_RANGE.start());
+    }
+
+    None
+}
+
+fn schedule_hardware_slot_apply(current_slot: u8, event_at: Instant) -> Option<(u8, Instant)> {
+    let new_slot = next_hardware_slot(current_slot)?;
+    let apply_at = event_at + HARDWARE_SLOT_SETTLE_DELAY;
+    Some((new_slot, apply_at))
+}
+
 /// Returns `Some(error response)` when the profile is out of range.
 fn validate_profile(profile: &Profile) -> Option<Response> {
     if !SOFTWARE_SPEED_RANGE.contains(&profile.speed) {
@@ -533,5 +755,44 @@ fn error_response(kind: ErrorKind, message: &str) -> Response {
     Response::Error {
         kind,
         message: message.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{next_hardware_slot, schedule_hardware_slot_apply, HARDWARE_SLOT_SETTLE_DELAY};
+
+    #[test]
+    fn hardware_slot_cycle_is_logical() {
+        let expected_slots = [2, 3, 4, 1];
+        let mut current_slot = 1;
+
+        for expected_slot in expected_slots {
+            assert_eq!(next_hardware_slot(current_slot), Some(expected_slot));
+            current_slot = expected_slot;
+        }
+
+        assert_eq!(next_hardware_slot(0), None);
+    }
+
+    #[test]
+    fn rapid_events_advance_each_slot_and_delay_the_final_apply() {
+        let first_event_at = Instant::now();
+        let Some((second_slot, first_apply_at)) = schedule_hardware_slot_apply(1, first_event_at) else {
+            panic!("slot 1 should advance");
+        };
+
+        let second_event_at = first_event_at + Duration::from_millis(50);
+        let Some((third_slot, second_apply_at)) = schedule_hardware_slot_apply(second_slot, second_event_at) else {
+            panic!("slot 2 should advance");
+        };
+
+        assert_eq!(second_slot, 2);
+        assert_eq!(third_slot, 3);
+        assert_eq!(first_apply_at, first_event_at + HARDWARE_SLOT_SETTLE_DELAY);
+        assert_eq!(second_apply_at, second_event_at + HARDWARE_SLOT_SETTLE_DELAY);
+        assert!(second_apply_at > first_apply_at);
     }
 }

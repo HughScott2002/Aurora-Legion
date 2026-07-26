@@ -20,6 +20,9 @@ error-stack = "0.5.0"
 dirs = "6.0"
 signal-hook = "0.3"
 
+# Fn+Space hardware slot detection (ACPI netlink listener)
+libc = "0.2"
+
 # Temperature effect
 sysinfo = "0.35.0"
 

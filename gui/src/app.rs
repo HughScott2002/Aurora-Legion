@@ -8,7 +8,7 @@ use std::cell::Cell;
 
 use aurora_protocol::{
     effects::{Brightness, Direction, Effects, SwipeMode},
-    ipc::{DaemonState, KeyboardStatus, Request},
+    ipc::{DaemonState, KeyboardStatus, Request, HARDWARE_SLOT_COUNT, HARDWARE_SLOT_OFF},
     profile::Profile,
 };
 use relm4::{
@@ -186,6 +186,21 @@ impl SimpleComponent for App {
         let header_bar = adw::HeaderBar::new();
         header_bar.set_title_widget(Some(&switcher));
 
+        // Primary menu (HIG: every app has one, with About).
+        let menu = gtk::gio::Menu::new();
+        menu.append(Some("About Aurora"), Some("app.about"));
+        let menu_button = gtk::MenuButton::new();
+        menu_button.set_icon_name("open-menu-symbolic");
+        menu_button.set_tooltip_text(Some("Main Menu"));
+        menu_button.set_menu_model(Some(&menu));
+        header_bar.pack_end(&menu_button);
+
+        let about_action = gtk::gio::SimpleAction::new("about", None);
+        about_action.connect_activate(|_, _| {
+            show_about_dialog();
+        });
+        relm4::main_application().add_action(&about_action);
+
         let permission_banner = adw::Banner::new("");
         permission_banner.set_revealed(false);
         // The button is only labeled (and therefore visible) in the
@@ -198,6 +213,20 @@ impl SimpleComponent for App {
         toolbar_view.add_top_bar(&header_bar);
         toolbar_view.add_top_bar(&permission_banner);
         toolbar_view.set_content(Some(&content_stack));
+
+        // Narrow windows: the wide switcher does not fit in the header, so
+        // a breakpoint moves page switching to a bottom bar (the standard
+        // adaptive libadwaita pattern).
+        let switcher_bar = adw::ViewSwitcherBar::new();
+        switcher_bar.set_stack(Some(&view_stack));
+        toolbar_view.add_bottom_bar(&switcher_bar);
+
+        let narrow_title = adw::WindowTitle::new("Aurora", "");
+        let narrow_condition = adw::BreakpointCondition::new_length(adw::BreakpointConditionLengthType::MaxWidth, 550.0, adw::LengthUnit::Sp);
+        let narrow_breakpoint = adw::Breakpoint::new(narrow_condition);
+        narrow_breakpoint.add_setter(&switcher_bar, "reveal", Some(&true.to_value()));
+        narrow_breakpoint.add_setter(&header_bar, "title-widget", Some(&narrow_title.to_value()));
+        root.add_breakpoint(narrow_breakpoint);
 
         let toast_overlay = adw::ToastOverlay::new();
         toast_overlay.set_child(Some(&toolbar_view));
@@ -706,11 +735,33 @@ impl App {
             }
         }
 
-        // Preview.
+        // Hardware slot caption (Fn+Space). Hidden when the daemon cannot
+        // read the slot, so unsupported machines see nothing new.
+        let hardware_slot = self.state.as_ref().and_then(|state| state.hardware_slot);
+        let slot_text = match hardware_slot {
+            Some(HARDWARE_SLOT_OFF) => Some("Keyboard backlight is off. Press Fn+Space to turn it back on.".to_string()),
+            Some(slot) => Some(format!("Hardware profile {slot} of {HARDWARE_SLOT_COUNT}. Fn+Space switches profiles.")),
+            None => None,
+        };
+        let slot_visible = slot_text.is_some();
+        if let Some(text) = &slot_text {
+            if page.slot_label.text() != text.as_str() {
+                page.slot_label.set_text(text);
+            }
+        }
+        if page.slot_label.is_visible() != slot_visible {
+            page.slot_label.set_visible(slot_visible);
+        }
+
+        // Preview. While the backlight is off the physical keyboard is
+        // dark, so the preview shows that instead of the stored colors.
+        let backlight_off = hardware_slot == Some(HARDWARE_SLOT_OFF);
         let mut preview_colors: [[u8; 3]; 4] = [[0; 3]; 4];
-        for (target, zone) in preview_colors.iter_mut().zip(self.profile.rgb_zones.iter()) {
-            if zone.enabled {
-                *target = zone.rgb;
+        if !backlight_off {
+            for (target, zone) in preview_colors.iter_mut().zip(self.profile.rgb_zones.iter()) {
+                if zone.enabled {
+                    *target = zone.rgb;
+                }
             }
         }
         page.preview.set_colors(preview_colors);
@@ -767,6 +818,18 @@ fn show_save_profile_dialog(sender: &ComponentSender<App>) {
     dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("save"));
     dialog.set_close_response("cancel");
+
+    // Enter in the entry saves, matching the suggested response; without
+    // this the key press is swallowed by the entry.
+    let activate_sender = sender.clone();
+    let dialog_for_activate = dialog.downgrade();
+    entry.connect_activate(move |entry| {
+        let name = entry.text().to_string();
+        activate_sender.input(AppMsg::SaveProfileConfirmed { name });
+        if let Some(dialog) = dialog_for_activate.upgrade() {
+            dialog.close();
+        }
+    });
 
     let dialog_sender = sender.clone();
     dialog.connect_response(None, move |dialog, response| {
@@ -833,6 +896,22 @@ fn show_permission_help_dialog() {
         }
     });
 
+    dialog.present(Some(&window));
+}
+
+fn show_about_dialog() {
+    let Some(window) = relm4::main_application().active_window() else {
+        return;
+    };
+
+    let dialog = adw::AboutDialog::new();
+    dialog.set_application_name("Aurora");
+    dialog.set_application_icon("io.github.HughScott2002.Aurora");
+    dialog.set_version(env!("CARGO_PKG_VERSION"));
+    dialog.set_developer_name("Hugh Scott");
+    dialog.set_license_type(gtk::License::Gpl30);
+    dialog.set_website("https://github.com/HughScott2002/Aurora-Legion");
+    dialog.set_issue_url("https://github.com/HughScott2002/Aurora-Legion/issues");
     dialog.present(Some(&window));
 }
 

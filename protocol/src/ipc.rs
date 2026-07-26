@@ -25,6 +25,13 @@ pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// see `docs/protocol.md` for the negotiation rules.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Number of Aurora lighting slots selected through Fn+Space:
+/// `DaemonState::hardware_slot` is 1 to this value while a slot is lit.
+pub const HARDWARE_SLOT_COUNT: u8 = 3;
+
+/// `DaemonState::hardware_slot` value while the backlight is off.
+pub const HARDWARE_SLOT_OFF: u8 = 4;
+
 pub const SOCKET_FILE_NAME: &str = "aurora.sock";
 
 /// Path of the daemon socket: `$XDG_RUNTIME_DIR/aurora.sock`, with a
@@ -167,6 +174,14 @@ pub struct DaemonState {
     pub custom_effects: Vec<CustomEffect>,
     /// Daemon package version, so clients can spot mismatches.
     pub version: String,
+    /// Aurora's logical Fn+Space slot: 1 to 3 for remembered lighting
+    /// profiles, 4 while Aurora holds the backlight off, `null` when no
+    /// keyboard slot is active. The daemon reads the EC counter once at
+    /// acquisition, then advances this value from WMI events because its
+    /// own lighting writes invalidate later counter reads.
+    /// Additive field; absent on older daemons.
+    #[serde(default)]
+    pub hardware_slot: Option<u8>,
 }
 
 #[cfg(test)]
@@ -188,6 +203,7 @@ mod tests {
             }],
             custom_effects: Vec::new(),
             version: "0.22.0".to_string(),
+            hardware_slot: Some(2),
         }
     }
 
@@ -277,6 +293,20 @@ mod tests {
         let path = socket_path();
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         assert_eq!(file_name, SOCKET_FILE_NAME);
+    }
+
+    /// States from daemons that predate hardware slot tracking must keep
+    /// parsing; the field is additive and defaults to unknown.
+    #[test]
+    fn state_without_hardware_slot_still_parses() {
+        let mut state = sample_state();
+        state.hardware_slot = None;
+
+        let mut json = serde_json::to_value(&state).unwrap();
+        json.as_object_mut().unwrap().remove("hardware_slot");
+
+        let parsed: DaemonState = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.hardware_slot, None);
     }
 
     /// The old app serialized settings with these exact field names; the

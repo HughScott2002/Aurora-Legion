@@ -5,13 +5,13 @@
 
 use std::{convert::TryInto, path::PathBuf, process::ExitCode, str::FromStr};
 
-use clap::{Args, Subcommand};
 use aurora_protocol::{
     custom_effect::CustomEffect,
     effects::{Brightness, Direction, Effects},
     ipc::{Request, Response},
     profile::{arr_to_zones, Profile},
 };
+use clap::{Args, Subcommand};
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -168,6 +168,13 @@ fn run_status() -> ExitCode {
 
     let profile_name = state.current.name.unwrap_or_else(|| "(unsaved)".to_string());
     println!("profile:  {profile_name} ({} effect)", state.current.effect);
+    if let Some(slot) = state.hardware_slot {
+        if slot == aurora_protocol::ipc::HARDWARE_SLOT_OFF {
+            println!("hw slot:  backlight off (Fn+Space)");
+        } else {
+            println!("hw slot:  {slot} of {}", aurora_protocol::ipc::HARDWARE_SLOT_COUNT);
+        }
+    }
     if let Some(name) = state.custom_effect_playing {
         println!("playing:  custom effect '{name}'");
     }

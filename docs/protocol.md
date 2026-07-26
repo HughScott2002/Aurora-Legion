@@ -171,7 +171,8 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [ Profile, ... ],
   "custom_effects": [ CustomEffect, ... ],
-  "version": "0.21.0"
+  "version": "0.21.0",
+  "hardware_slot": 2
 }
 ```
 
@@ -179,6 +180,13 @@ Subscription semantics:
   or `null` when none plays.
 - `current` is the live profile: what the keyboard shows unless a
   custom effect is playing.
+- `hardware_slot` is Aurora's logical Fn+Space slot: 1 to 3 for the
+  remembered lighting profiles, 4 while Aurora holds the backlight
+  off, and `null` when no keyboard slot is active. The daemon seeds it
+  from one EC counter read at acquisition, then advances it from WMI
+  events because Aurora's own lighting writes invalidate later counter
+  reads. Added after protocol version 1 as an additive field; older
+  daemons omit it. `current` follows the active lighting slot.
 
 ### KeyboardStatus
 
