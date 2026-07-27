@@ -47,6 +47,12 @@ const MAX_CUSTOM_EFFECT_STEPS: usize = 4096;
 /// coalesced.
 const HARDWARE_SLOT_SETTLE_DELAY: Duration = Duration::from_millis(250);
 
+/// Diagnostic only (`AURORA_TRACE`): how long after a slot write to sample
+/// the EC counter. Long enough that the engine has sent its report and a
+/// late controller transition would have finished. Reads never move the
+/// counter, so sampling cannot change behavior.
+const SLOT_TRACE_DELAY: Duration = Duration::from_millis(500);
+
 /// Commands the core accepts. Keep this the only way to mutate daemon state.
 pub enum Command {
     Ipc {
@@ -87,6 +93,12 @@ pub struct Core {
     /// Deadline for applying the final logical slot after an Fn+Space
     /// burst. A later event replaces this deadline.
     hardware_slot_apply_at: Option<Instant>,
+    /// Read handle for the EC counter, kept past acquisition only so
+    /// tracing can sample it. The counter is still never used for slot
+    /// identity after the first read.
+    slot_reader: Option<legion_rgb_driver::SlotReader>,
+    /// Deadline for a diagnostic counter sample after a slot write.
+    slot_trace_at: Option<Instant>,
 
     subscribers: Vec<Sender<Outbound>>,
 
@@ -114,6 +126,8 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         stop_signals: StopSignals::new(),
         hardware_slot: None,
         hardware_slot_apply_at: None,
+        slot_reader: None,
+        slot_trace_at: None,
         subscribers: Vec::new(),
         settings_dirty: false,
         last_change_at: Instant::now(),
@@ -137,6 +151,7 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         }
 
         core.apply_hardware_slot_if_due();
+        core.trace_slot_counter_if_due();
         core.save_settings_if_due();
     }
 
@@ -164,6 +179,8 @@ impl Core {
         self.stop_signals = StopSignals::new();
         self.hardware_slot = None;
         self.hardware_slot_apply_at = None;
+        self.slot_reader = None;
+        self.slot_trace_at = None;
         self.keyboard_status = KeyboardStatus::Searching;
         self.acquire_attempt_count = 0;
         self.next_acquire_at = Instant::now();
@@ -187,9 +204,16 @@ impl Core {
                 // This is the only trusted counter read. It must happen
                 // before the keyboard moves into the engine and before
                 // Aurora sends its first lighting report.
-                let slot_read_result = keyboard.slot_reader().read_slot_counter();
+                let slot_reader = keyboard.slot_reader();
+                let slot_read_result = slot_reader.read_slot_counter();
                 let initial_slot = match slot_read_result {
-                    Ok(value) if is_settled_slot_value(value) => Some(value),
+                    Ok(value) if is_settled_slot_value(value) => {
+                        // Logged even on the happy path: a wrong-but-settled
+                        // start value drifts every later slot for the life of
+                        // this acquisition, and nothing else would show it.
+                        eprintln!("core: startup slot counter read {value}");
+                        Some(value)
+                    }
                     Ok(value) => {
                         let fallback_slot = *HARDWARE_SLOT_RANGE.start();
                         eprintln!(
@@ -213,6 +237,7 @@ impl Core {
                 self.keyboard_status = KeyboardStatus::Connected;
                 self.custom_effect_playing = None;
                 self.hardware_slot = initial_slot;
+                self.slot_reader = Some(slot_reader);
                 self.apply_profile_for_acquired_slot();
                 self.broadcast_state();
             }
@@ -264,10 +289,14 @@ impl Core {
             Duration::from_millis(TICK_IDLE_MS)
         };
 
-        if let Some(apply_at) = self.hardware_slot_apply_at {
-            let apply_timeout = apply_at.saturating_duration_since(Instant::now());
-            if apply_timeout < timeout {
-                timeout = apply_timeout;
+        let deadlines = [self.hardware_slot_apply_at, self.slot_trace_at];
+        for deadline in deadlines {
+            let Some(deadline) = deadline else {
+                continue;
+            };
+            let deadline_timeout = deadline.saturating_duration_since(Instant::now());
+            if deadline_timeout < timeout {
+                timeout = deadline_timeout;
             }
         }
 
@@ -595,6 +624,7 @@ impl Core {
             if let Some(engine) = &self.engine {
                 engine.set_profile(Profile::default());
             }
+            self.schedule_slot_trace();
             self.broadcast_state();
             return;
         }
@@ -616,8 +646,47 @@ impl Core {
         if let Some(engine) = &self.engine {
             engine.set_profile(slot_profile);
         }
+        self.schedule_slot_trace();
         self.mark_changed();
         self.broadcast_state();
+    }
+
+    /// Arm a diagnostic counter sample after a slot write. No-op unless
+    /// `AURORA_TRACE` is set.
+    fn schedule_slot_trace(&mut self) {
+        if !legion_rgb_driver::trace_enabled() {
+            return;
+        }
+
+        self.slot_trace_at = Some(Instant::now() + SLOT_TRACE_DELAY);
+    }
+
+    /// Diagnostic only: read the EC counter once, a fixed delay after
+    /// Aurora's own slot write, and log it beside the logical slot. This is
+    /// the only view of what the controller did after our report landed.
+    /// It samples the counter, not the visible lighting, so a mismatch is
+    /// evidence and not proof.
+    fn trace_slot_counter_if_due(&mut self) {
+        let Some(trace_at) = self.slot_trace_at else {
+            return;
+        };
+        if Instant::now() < trace_at {
+            return;
+        }
+
+        self.slot_trace_at = None;
+
+        let Some(slot_reader) = &self.slot_reader else {
+            return;
+        };
+        let Some(logical_slot) = self.hardware_slot else {
+            return;
+        };
+
+        match slot_reader.read_slot_counter() {
+            Ok(counter) => eprintln!("trace: {}ms after slot write, logical slot {logical_slot}, EC counter {counter}", SLOT_TRACE_DELAY.as_millis()),
+            Err(error) => eprintln!("trace: {}ms after slot write, logical slot {logical_slot}, EC counter unreadable ({error})", SLOT_TRACE_DELAY.as_millis()),
+        }
     }
 
     /// Every lighting change lands in whichever EC slot is active, so the

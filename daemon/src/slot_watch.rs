@@ -86,6 +86,7 @@ pub fn spawn(command_tx: Sender<Command>) {
             }
         };
 
+        let trace_enabled = legion_rgb_driver::trace_enabled();
         let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
         loop {
             let received_bytes = match socket.recv(&mut buffer) {
@@ -96,8 +97,28 @@ pub fn spawn(command_tx: Sender<Command>) {
                 }
             };
 
+            // Every ACPI event is inspected, and under tracing every one is
+            // logged whether it matched or not. Without that, a missing
+            // Fn+Space reaction cannot be told apart from a tap that never
+            // reached the socket.
             let datagram = &buffer[..received_bytes];
-            if !is_light_profile_event(datagram, family_id) {
+            let events = parse_acpi_events(datagram, family_id);
+
+            let mut matched = false;
+            for event in &events {
+                let is_match = is_light_profile_event(event);
+                if is_match {
+                    matched = true;
+                }
+                if trace_enabled {
+                    let device_class = String::from_utf8_lossy(event.device_class);
+                    let bus_id = String::from_utf8_lossy(event.bus_id);
+                    let event_type = event.event_type;
+                    eprintln!("trace: acpi event class={device_class} bus={bus_id} type={event_type:#06x} match={is_match}");
+                }
+            }
+
+            if !matched {
                 continue;
             }
 
@@ -292,10 +313,20 @@ fn parse_family_reply(datagram: &[u8]) -> Option<AcpiFamily> {
     None
 }
 
-/// True when the datagram carries the GameZone light-profile-change WMI
-/// event: an `acpi_event` message whose embedded `acpi_genl_event` has
-/// device class `"wmi"` and the 0xE600 event type.
-fn is_light_profile_event(datagram: &[u8], family_id: u16) -> bool {
+/// One `acpi_genl_event` lifted out of a datagram. The string fields borrow
+/// the receive buffer and are already trimmed at their first nul.
+struct AcpiEvent<'a> {
+    device_class: &'a [u8],
+    bus_id: &'a [u8],
+    event_type: u32,
+}
+
+/// Every ACPI event carried by one datagram of the `acpi_event` family.
+/// Malformed or truncated messages are skipped rather than reported: the
+/// kernel is the peer here, and a short read is not worth a daemon error.
+fn parse_acpi_events(datagram: &[u8], family_id: u16) -> Vec<AcpiEvent<'_>> {
+    let mut events: Vec<AcpiEvent<'_>> = Vec::new();
+
     for message in split_messages(datagram) {
         if message.message_type != family_id {
             continue;
@@ -320,27 +351,36 @@ fn is_light_profile_event(datagram: &[u8], family_id: u16) -> bool {
             let Some(device_class) = attr_payload.get(..DEVICE_CLASS_BYTES) else {
                 continue;
             };
-            if !nul_terminated_matches(device_class, WMI_DEVICE_CLASS) {
-                continue;
-            }
-
             let Some(bus_id) = attr_payload.get(DEVICE_CLASS_BYTES..DEVICE_CLASS_BYTES + BUS_ID_BYTES) else {
                 continue;
             };
-            if !nul_terminated_starts_with(bus_id, WMI_BUS_ID_PREFIX) {
-                continue;
-            }
-
             let Some(event_type) = read_u32_ne(attr_payload, EVENT_TYPE_OFFSET) else {
                 continue;
             };
-            if LIGHT_PROFILE_EVENT_TYPES.contains(&event_type) {
-                return true;
-            }
+
+            events.push(AcpiEvent {
+                device_class: nul_terminated_str(device_class),
+                bus_id: nul_terminated_str(bus_id),
+                event_type,
+            });
         }
     }
 
-    false
+    events
+}
+
+/// True when this event is the GameZone light-profile-change WMI
+/// notification: device class `"wmi"`, the Lenovo WMI mapper device, and
+/// one of the two observed encodings of DSDT notify ID 0xE6.
+fn is_light_profile_event(event: &AcpiEvent<'_>) -> bool {
+    if event.device_class != WMI_DEVICE_CLASS.as_bytes() {
+        return false;
+    }
+    if !event.bus_id.starts_with(WMI_BUS_ID_PREFIX.as_bytes()) {
+        return false;
+    }
+
+    LIGHT_PROFILE_EVENT_TYPES.contains(&event.event_type)
 }
 
 // --- Byte helpers --------------------------------------------------------
@@ -377,11 +417,6 @@ fn write_u32_ne(bytes: &mut [u8], offset: usize, value: u32) {
 /// Compare a fixed-size, nul-padded C string field against `expected`.
 fn nul_terminated_matches(field: &[u8], expected: &str) -> bool {
     nul_terminated_str(field) == expected.as_bytes()
-}
-
-/// True when the nul-terminated C string in `field` starts with `prefix`.
-fn nul_terminated_starts_with(field: &[u8], prefix: &str) -> bool {
-    nul_terminated_str(field).starts_with(prefix.as_bytes())
 }
 
 /// The bytes of a fixed-size, nul-padded C string field up to its first nul.
@@ -534,6 +569,18 @@ mod tests {
         message
     }
 
+    /// The old single-call shape, kept so each test still reads as one
+    /// question about one datagram.
+    fn datagram_matches(datagram: &[u8], family_id: u16) -> bool {
+        let events = parse_acpi_events(datagram, family_id);
+        for event in &events {
+            if is_light_profile_event(event) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn sample_acpi_event(device_class: &str, bus_id: &str, event_type: u32) -> Vec<u8> {
         let mut event = vec![0u8; DEVICE_CLASS_BYTES + BUS_ID_BYTES + 1 + 8];
         event[..device_class.len()].copy_from_slice(device_class.as_bytes());
@@ -598,13 +645,13 @@ mod tests {
         let mut raw_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut raw_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE6));
         let raw_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &raw_attrs);
-        assert!(is_light_profile_event(&raw_datagram, 24));
+        assert!(datagram_matches(&raw_datagram, 24));
 
         // Packed form, as maniac103's 2021 trace reports it.
         let mut packed_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut packed_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE600));
         let packed_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &packed_attrs);
-        assert!(is_light_profile_event(&packed_datagram, 24));
+        assert!(datagram_matches(&packed_datagram, 24));
     }
 
     #[test]
@@ -613,31 +660,31 @@ mod tests {
         let mut battery_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut battery_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("battery", "PNP0C0A:00", 0xE6));
         let battery_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &battery_attrs);
-        assert!(!is_light_profile_event(&battery_datagram, 24));
+        assert!(!datagram_matches(&battery_datagram, 24));
 
         // Wrong bus id (a WMI event from some other mapper device).
         let mut other_wmi_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut other_wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "OTHER123:00", 0xE6));
         let other_wmi_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &other_wmi_attrs);
-        assert!(!is_light_profile_event(&other_wmi_datagram, 24));
+        assert!(!datagram_matches(&other_wmi_datagram, 24));
 
         // Wrong event type: the 0xE8 event that accompanies every press,
         // and the thermal-mode hotkey.
         let mut companion_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut companion_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE8));
         let companion_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &companion_attrs);
-        assert!(!is_light_profile_event(&companion_datagram, 24));
+        assert!(!datagram_matches(&companion_datagram, 24));
 
         let mut thermal_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut thermal_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xD000));
         let thermal_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &thermal_attrs);
-        assert!(!is_light_profile_event(&thermal_datagram, 24));
+        assert!(!datagram_matches(&thermal_datagram, 24));
 
         // Wrong family id entirely.
         let mut wmi_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE6));
         let wrong_family_datagram = wrap_in_message(30, ACPI_GENL_CMD_EVENT, &wmi_attrs);
-        assert!(!is_light_profile_event(&wrong_family_datagram, 24));
+        assert!(!datagram_matches(&wrong_family_datagram, 24));
     }
 
     #[test]
@@ -649,7 +696,7 @@ mod tests {
         for cut in 0..datagram.len() {
             let truncated = &datagram[..cut];
             // Must never panic; the result value does not matter.
-            let _ = is_light_profile_event(truncated, 24);
+            let _ = datagram_matches(truncated, 24);
             let _ = parse_family_reply(truncated);
         }
     }

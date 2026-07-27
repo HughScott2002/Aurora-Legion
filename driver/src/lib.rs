@@ -3,7 +3,7 @@ use hidapi::{HidApi, HidDevice};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, OnceLock,
     },
     thread,
     time::Duration,
@@ -43,6 +43,28 @@ const FEATURE_REPORT_BYTES: usize = 33;
 
 /// Report ID of the lighting feature report.
 const FEATURE_REPORT_ID: u8 = 0xcc;
+
+/// Offset of the first zone's red byte inside a feature report.
+const PAYLOAD_COLOR_OFFSET: usize = 5;
+
+/// Environment variable that turns on write and event tracing across the
+/// daemon. Tracing is a diagnostic for the Fn+Space slot race; it is off
+/// by default because software effects write continuously.
+pub const TRACE_ENV_VAR: &str = "AURORA_TRACE";
+
+/// True when [`TRACE_ENV_VAR`] is set to anything other than empty or "0".
+/// Read once: the environment cannot change while the process runs, and
+/// this is called on every keyboard write.
+pub fn trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+
+    let enabled = ENABLED.get_or_init(|| match std::env::var(TRACE_ENV_VAR) {
+        Ok(value) => !value.is_empty() && value != "0",
+        Err(_) => false,
+    });
+
+    *enabled
+}
 
 pub enum BaseEffects {
     Static,
@@ -89,7 +111,8 @@ impl LightingState {
         payload[4] = self.brightness;
 
         if let BaseEffects::Static | BaseEffects::Breath = self.effect_type {
-            payload[5..17].copy_from_slice(&self.rgb_values);
+            let color_end = PAYLOAD_COLOR_OFFSET + self.rgb_values.len();
+            payload[PAYLOAD_COLOR_OFFSET..color_end].copy_from_slice(&self.rgb_values);
         };
 
         Ok(payload)
@@ -128,6 +151,31 @@ fn lock_hid_device(device: &SharedHidDevice) -> MutexGuard<'_, HidDevice> {
     }
 }
 
+/// One line per feature report that reached the controller, so a traced
+/// session shows exactly what Aurora sent and when. This is the only
+/// evidence that separates "Aurora never wrote" from "Aurora wrote and the
+/// controller overwrote it afterwards".
+fn trace_feature_report(payload: &[u8; FEATURE_REPORT_BYTES], send_result: &std::result::Result<(), hidapi::HidError>) {
+    let mut zone_text = String::new();
+    for zone_index in ZONE_RANGE {
+        let byte_offset = PAYLOAD_COLOR_OFFSET + (zone_index as usize) * 3;
+        let red = payload[byte_offset];
+        let green = payload[byte_offset + 1];
+        let blue = payload[byte_offset + 2];
+        zone_text.push_str(&format!(" {red:02x}{green:02x}{blue:02x}"));
+    }
+
+    let outcome = match send_result {
+        Ok(()) => "ok".to_string(),
+        Err(error) => format!("failed: {error}"),
+    };
+
+    let effect_byte = payload[2];
+    let speed = payload[3];
+    let brightness = payload[4];
+    eprintln!("trace: hid write effect={effect_byte:#04x} speed={speed} brightness={brightness} zones{zone_text} -> {outcome}");
+}
+
 pub struct Keyboard {
     keyboard_hid: SharedHidDevice,
     current_state: LightingState,
@@ -142,7 +190,14 @@ impl Keyboard {
         // Propagate instead of unwrapping: this is the call that fails when
         // the keyboard is unplugged, and callers need to see that error.
         let device = lock_hid_device(&self.keyboard_hid);
-        device.send_feature_report(&payload)?;
+        let send_result = device.send_feature_report(&payload);
+        drop(device); // Release the handle before formatting a trace line.
+
+        if trace_enabled() {
+            trace_feature_report(&payload, &send_result);
+        }
+
+        send_result?;
 
         Ok(())
     }

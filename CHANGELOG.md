@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in tracing behind the `AURORA_TRACE` environment variable. The
+  daemon logs every ACPI event with its match verdict, every feature
+  report with its payload and result, the slot counter read at
+  acquisition, and a counter sample after each slot write. Off by
+  default, because software effects write continuously.
+
 ## [0.23.0] - 2026-07-26
 
 ### Added
