@@ -24,16 +24,14 @@ pub struct LightingPage {
     /// Caption under the preview naming the active slot.
     pub slot_label: gtk::Label,
 
-    pub slots_group: adw::PreferencesGroup,
-    /// One row per lit slot, plus the off row. Activating a row selects it.
-    pub slot_rows: [adw::ActionRow; SLOT_COUNT],
-    pub off_row: adw::ActionRow,
-    /// Colour chips beside each slot row. Stock boxes carrying a CSS
-    /// background, restyled from [`LightingPage::set_slot_colors`]; the
-    /// keyboard preview stays the only place that draws.
-    slot_swatches: [gtk::Box; SLOT_COUNT],
-    swatch_css: gtk::CssProvider,
-    shown_swatch_colors: std::cell::Cell<[[u8; 3]; SLOT_COUNT]>,
+    /// Slot picker: linked toggle buttons, one per lit slot plus off.
+    /// Horizontal because four short choices in a column is a list
+    /// pretending to be a switch.
+    pub slot_buttons: [gtk::ToggleButton; SLOT_COUNT],
+    pub off_button: gtk::ToggleButton,
+    /// Shown only when Fn+Space cannot be trusted, where the key would
+    /// have been used.
+    pub slot_note: gtk::Label,
 
     pub effect_row: adw::ComboRow,
 
@@ -63,9 +61,9 @@ pub fn effect_names() -> Vec<&'static str> {
     names
 }
 
-/// Width and height of a slot colour chip, in logical pixels. Big enough
-/// to read at a glance, small enough to sit inside a list row.
-const SWATCH_SIZE_PX: i32 = 24;
+/// Every slot button is the same width so the picker reads as one
+/// control rather than four differently sized ones.
+const SLOT_BUTTON_WIDTH_PX: i32 = 56;
 
 pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
@@ -75,57 +73,63 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     content.set_margin_end(12);
 
     // --- Slots -----------------------------------------------------------
-    // First on the page because every control below edits the selected
-    // slot. Putting it lower would mean reading the page bottom-up to know
-    // what you are changing.
-    let slots_group = adw::PreferencesGroup::new();
-    slots_group.set_title("Slots");
-    slots_group.set_description(Some("Each profile holds one look per slot. Fn+Space cycles them."));
+    // First on the page: every control below edits the selected slot, so
+    // a page ordered the other way has to be read bottom-up.
+    //
+    // No colour chips here. The keyboard is the display, and a chip beside
+    // the picker competes with the lit keys it is describing.
+    let slot_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    slot_box.add_css_class("linked");
+    slot_box.set_halign(gtk::Align::Center);
 
-    let swatch_css = gtk::CssProvider::new();
-    if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &swatch_css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
-
-    let mut slot_rows: Vec<adw::ActionRow> = Vec::with_capacity(SLOT_COUNT);
-    let mut slot_swatches: Vec<gtk::Box> = Vec::with_capacity(SLOT_COUNT);
-
+    let mut slot_buttons: Vec<gtk::ToggleButton> = Vec::with_capacity(SLOT_COUNT);
     for (slot_position, slot) in LIT_SLOTS.iter().enumerate() {
-        let row = adw::ActionRow::new();
-        row.set_title(&format!("Slot {}", slot_position + 1));
-        row.set_activatable(true);
-
-        let swatch = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        swatch.set_size_request(SWATCH_SIZE_PX, SWATCH_SIZE_PX);
-        swatch.set_valign(gtk::Align::Center);
-        swatch.add_css_class("aurora-swatch");
-        swatch.add_css_class(&format!("aurora-swatch-{}", slot_position + 1));
-        // Decorative: the row title and subtitle carry the same meaning.
-        swatch.set_accessible_role(gtk::AccessibleRole::Presentation);
-        row.add_suffix(&swatch);
+        let button = gtk::ToggleButton::with_label(&format!("{}", slot_position + 1));
+        button.set_width_request(SLOT_BUTTON_WIDTH_PX);
+        button.set_tooltip_text(Some(&format!("Slot {}", slot_position + 1)));
 
         let slot_sender = sender.clone();
         let selected_slot = *slot;
-        row.connect_activated(move |_| {
+        button.connect_toggled(move |button| {
+            if !button.is_active() {
+                return; // The group deactivates the previous button too.
+            }
             slot_sender.input(AppMsg::SlotSelected { slot: selected_slot });
         });
 
-        slots_group.add(&row);
-        slot_rows.push(row);
-        slot_swatches.push(swatch);
+        slot_box.append(&button);
+        slot_buttons.push(button);
     }
 
-    let off_row = adw::ActionRow::new();
-    off_row.set_title("Backlight Off");
-    off_row.set_subtitle("The fourth Fn+Space position");
-    off_row.set_activatable(true);
+    let off_button = gtk::ToggleButton::with_label("Off");
+    off_button.set_width_request(SLOT_BUTTON_WIDTH_PX);
+    off_button.set_tooltip_text(Some("Backlight off, the fourth Fn+Space position"));
     let off_sender = sender.clone();
-    off_row.connect_activated(move |_| {
+    off_button.connect_toggled(move |button| {
+        if !button.is_active() {
+            return;
+        }
         off_sender.input(AppMsg::SlotSelected { slot: SlotSelection::Off });
     });
-    slots_group.add(&off_row);
+    slot_box.append(&off_button);
 
-    content.append(&slots_group);
+    // One group, so the buttons behave as a picker rather than four
+    // independent switches.
+    for button in &slot_buttons {
+        button.set_group(Some(&off_button));
+    }
+
+    let slot_note = gtk::Label::new(None);
+    slot_note.add_css_class("caption");
+    slot_note.add_css_class("dim-label");
+    slot_note.set_wrap(true);
+    slot_note.set_justify(gtk::Justification::Center);
+    slot_note.set_visible(false);
+
+    let slot_picker = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    slot_picker.append(&slot_box);
+    slot_picker.append(&slot_note);
+    content.append(&slot_picker);
 
     // --- Preview ---------------------------------------------------------
     // The preview and its slot caption sit in their own tighter box: the
@@ -220,6 +224,10 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let speed_adjustment = gtk::Adjustment::new(1.0, 1.0, 10.0, 1.0, 1.0, 0.0);
     let speed_row = adw::SpinRow::new(Some(&speed_adjustment), 1.0, 0);
     speed_row.set_title("Speed");
+    // Built hidden to match the default effect. `sync_lighting_page` decides
+    // from then on, but it only runs once daemon state arrives, so anything
+    // Static does not use would flash on screen first.
+    speed_row.set_visible(false);
     let speed_sender = sender.clone();
     // Signals go on the Adjustment (stable API) rather than the row.
     speed_adjustment.connect_value_changed(move |adjustment| {
@@ -240,6 +248,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let direction_row = adw::ComboRow::new();
     direction_row.set_title("Direction");
     direction_row.set_model(Some(&direction_model));
+    direction_row.set_visible(false);
     let direction_sender = sender.clone();
     direction_row.connect_selected_notify(move |row| {
         let index = row.selected();
@@ -254,6 +263,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Ambient-only options --------------------------------------------
     let ambient_group = adw::PreferencesGroup::new();
     ambient_group.set_title("Ambient Light");
+    ambient_group.set_visible(false);
 
     let fps_adjustment = gtk::Adjustment::new(30.0, 1.0, 60.0, 1.0, 5.0, 0.0);
     let fps_row = adw::SpinRow::new(Some(&fps_adjustment), 1.0, 0);
@@ -280,6 +290,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Swipe-only options ----------------------------------------------
     let swipe_group = adw::PreferencesGroup::new();
     swipe_group.set_title("Swipe");
+    swipe_group.set_visible(false);
 
     let swipe_mode_model = gtk::StringList::new(&["Change", "Fill"]);
     let swipe_mode_row = adw::ComboRow::new();
@@ -297,6 +308,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let clean_row = adw::SwitchRow::new();
     clean_row.set_title("Clean with Black");
     clean_row.set_subtitle("Wipe to black between fills");
+    // Only the fill mode wipes, so the switch has nothing to mean in the
+    // default change mode.
+    clean_row.set_visible(false);
     let clean_sender = sender.clone();
     clean_row.connect_active_notify(move |row| {
         clean_sender.input(AppMsg::CleanWithBlackPicked { clean: row.is_active() });
@@ -319,25 +333,18 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         Err(_) => unreachable!("exactly four zone buttons are created above"),
     };
 
-    let slot_rows: [adw::ActionRow; SLOT_COUNT] = match slot_rows.try_into() {
-        Ok(rows) => rows,
-        Err(_) => unreachable!("one row per lit slot is created above"),
-    };
-    let slot_swatches: [gtk::Box; SLOT_COUNT] = match slot_swatches.try_into() {
-        Ok(swatches) => swatches,
-        Err(_) => unreachable!("one swatch per lit slot is created above"),
+    let slot_buttons: [gtk::ToggleButton; SLOT_COUNT] = match slot_buttons.try_into() {
+        Ok(buttons) => buttons,
+        Err(_) => unreachable!("one button per lit slot is created above"),
     };
 
     LightingPage {
         root: scrolled.upcast(),
         preview,
         slot_label,
-        slots_group,
-        slot_rows,
-        off_row,
-        slot_swatches,
-        swatch_css,
-        shown_swatch_colors: std::cell::Cell::new([[0; 3]; SLOT_COUNT]),
+        slot_buttons,
+        off_button,
+        slot_note,
         effect_row,
         zone_buttons,
         colors_group,
@@ -354,68 +361,45 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
 }
 
 impl LightingPage {
-    /// Repaint the slot chips. One provider carries all three rules and is
-    /// reloaded only when a colour actually changes, so this is not doing
-    /// CSS work on every state broadcast.
-    pub fn set_slot_colors(&self, colors: [[u8; 3]; SLOT_COUNT]) {
-        if self.shown_swatch_colors.get() == colors {
-            return;
-        }
-        self.shown_swatch_colors.set(colors);
-
-        let mut css = String::from(".aurora-swatch { border-radius: 6px; border: 1px solid alpha(currentColor, 0.2); }\n");
-        for (slot_position, color) in colors.iter().enumerate() {
-            let [red, green, blue] = *color;
-            css.push_str(&format!(
-                ".aurora-swatch-{} {{ background-color: rgb({red}, {green}, {blue}); }}\n",
-                slot_position + 1
-            ));
-        }
-
-        self.swatch_css.load_from_string(&css);
-    }
-
-    /// Mark which row is live and describe what each slot holds.
-    pub fn set_slot_rows(&self, active: SlotSelection, subtitles: [String; SLOT_COUNT]) {
-        for (slot_position, row) in self.slot_rows.iter().enumerate() {
-            let is_active = active.index() == Some(slot_position);
-            let subtitle = if is_active {
-                format!("{} (live)", subtitles[slot_position])
-            } else {
-                subtitles[slot_position].clone()
-            };
-            if row.subtitle().as_deref() != Some(subtitle.as_str()) {
-                row.set_subtitle(&subtitle);
-            }
-
-            let has_marker = row.has_css_class("aurora-slot-active");
-            if is_active && !has_marker {
-                row.add_css_class("aurora-slot-active");
-            }
-            if !is_active && has_marker {
-                row.remove_css_class("aurora-slot-active");
+    /// Move the picker to the daemon's slot. Compare before set: assigning
+    /// an already-active toggle still emits `toggled`, which would send the
+    /// selection straight back to the daemon.
+    pub fn set_active_slot(&self, active: SlotSelection) {
+        for (slot_position, button) in self.slot_buttons.iter().enumerate() {
+            let should_be_active = active.index() == Some(slot_position);
+            if button.is_active() != should_be_active {
+                button.set_active(should_be_active);
             }
         }
 
-        let off_is_active = active == SlotSelection::Off;
-        let off_subtitle = if off_is_active {
-            "The fourth Fn+Space position (live)"
-        } else {
-            "The fourth Fn+Space position"
-        };
-        if self.off_row.subtitle().as_deref() != Some(off_subtitle) {
-            self.off_row.set_subtitle(off_subtitle);
+        let off_should_be_active = active == SlotSelection::Off;
+        if self.off_button.is_active() != off_should_be_active {
+            self.off_button.set_active(off_should_be_active);
         }
     }
 
-    /// Describe why slots cannot be cycled with the key, when they cannot.
-    pub fn set_slot_sync_note(&self, note: Option<&str>) {
-        let description = match note {
-            Some(note) => note.to_string(),
-            None => "Each profile holds one look per slot. Fn+Space cycles them.".to_string(),
-        };
-        if self.slots_group.description().as_deref() != Some(description.as_str()) {
-            self.slots_group.set_description(Some(&description));
+    /// Say why the key cannot be trusted, next to the control that
+    /// replaces it. Nothing is shown when Fn+Space works, because a line
+    /// saying "working" is noise.
+    ///
+    /// `get_visible`, not `is_visible`: the latter is false whenever an
+    /// ancestor is hidden, which would skip the write and leave the label's
+    /// own flag stale until the page came back into view.
+    pub fn set_slot_note(&self, note: Option<&str>) {
+        match note {
+            Some(note) => {
+                if self.slot_note.text() != note {
+                    self.slot_note.set_text(note);
+                }
+                if !self.slot_note.get_visible() {
+                    self.slot_note.set_visible(true);
+                }
+            }
+            None => {
+                if self.slot_note.get_visible() {
+                    self.slot_note.set_visible(false);
+                }
+            }
         }
     }
 }

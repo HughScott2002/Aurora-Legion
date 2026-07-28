@@ -20,11 +20,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default, and rate limited when on.
 - `aurora slot` to show or select the active Fn+Space slot, and
   `aurora set --slot N` to write one slot without selecting it.
-- A slot control at the top of the app's Lighting page. Three slot rows
-  plus off, each with a colour chip and the effect it holds, the live one
-  marked. Clicking one selects it and applies it immediately, so slots
-  are reachable without the keyboard shortcut. When Fn+Space detection is
-  unavailable or degraded, the group says so and points at the rows.
+- A slot picker at the top of the app's Lighting page: four linked
+  buttons, three slots plus off, the live one marked. Picking one selects
+  it and applies it immediately, so slots are reachable without the
+  keyboard shortcut. When Fn+Space detection is unavailable or degraded,
+  a line under the buttons says so.
+- An interface style guide (`docs/ui-style-guide.md`) covering hierarchy,
+  the spacing scale, and what earns a place on screen, with the sources
+  it draws on.
 
 ### Changed
 
@@ -49,6 +52,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - State broadcasts carry profile and custom effect summaries instead of
   full bodies, and `PlayCustomEffectByName` starts a stored effect
   without sending it back to the daemon that holds it.
+- The Lighting page now hides the settings an effect does not use rather
+  than greying them out. Static shows no Speed or Direction, effects that
+  ignore zone colours show no colour pickers, and the swipe wipe switch
+  appears only in fill mode.
 
 ### Fixed
 
@@ -82,6 +89,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The preview split the keyboard into four equal bands when the real
   zones cover 24, 29, 25 and 18 keys, putting every boundary in the wrong
   place. Bands are now weighted by key count, so zone 4 is the numpad.
+- Every show-or-hide decision in the app tested effective visibility,
+  which is false whenever an ancestor is hidden. A group that should have
+  been hidden while the window showed the disconnected view kept its own
+  flag set and came back visible under an effect that does not use it.
+- The ambient and swipe option groups were built visible and hidden only
+  once daemon state arrived, so both flashed on screen at every startup.
 - The app's connection worker kept reconnecting and delivering into a
   dead runtime after the window closed, because relm4's input sender
   reports send failures only to the log. It now stops when the component

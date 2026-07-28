@@ -517,7 +517,7 @@ impl SimpleComponent for App {
         if let Some(message) = &self.incompatible {
             widgets.status_page.set_title("Incompatible Daemon");
             widgets.status_page.set_description(Some(message));
-            if widgets.start_button.is_visible() {
+            if widgets.start_button.get_visible() {
                 widgets.start_button.set_visible(false);
             }
         }
@@ -751,23 +751,31 @@ impl App {
             page.direction_row.set_selected(direction_index);
         }
 
-        // Sensitivity follows what the effect supports.
+        // A control the effect ignores is removed, not greyed out: a dimmed
+        // Direction row under Static is a permanent invitation to wonder what
+        // would happen if it were reachable.
+        //
+        // `get_visible`, not `is_visible`: the latter reports effective
+        // visibility, so every one of these compares reads false while the
+        // page sits behind the disconnected view, the write is skipped, and
+        // the row's own flag stays whatever it was. It reappears wrong when
+        // the page comes back.
         let takes_colors = self.lighting.effect.takes_color_array();
-        if page.colors_group.is_sensitive() != takes_colors {
-            page.colors_group.set_sensitive(takes_colors);
+        if page.colors_group.get_visible() != takes_colors {
+            page.colors_group.set_visible(takes_colors);
         }
         let takes_speed = self.lighting.effect.takes_speed();
-        if page.speed_row.is_sensitive() != takes_speed {
-            page.speed_row.set_sensitive(takes_speed);
+        if page.speed_row.get_visible() != takes_speed {
+            page.speed_row.set_visible(takes_speed);
         }
         let takes_direction = self.lighting.effect.takes_direction();
-        if page.direction_row.is_sensitive() != takes_direction {
-            page.direction_row.set_sensitive(takes_direction);
+        if page.direction_row.get_visible() != takes_direction {
+            page.direction_row.set_visible(takes_direction);
         }
 
         // Per-effect groups.
         let is_ambient = matches!(self.lighting.effect, Effects::AmbientLight { .. });
-        if page.ambient_group.is_visible() != is_ambient {
+        if page.ambient_group.get_visible() != is_ambient {
             page.ambient_group.set_visible(is_ambient);
         }
         if let Effects::AmbientLight { fps, saturation_boost } = self.lighting.effect {
@@ -782,7 +790,7 @@ impl App {
         }
 
         let is_swipe = matches!(self.lighting.effect, Effects::Swipe { .. } | Effects::SmoothWave { .. });
-        if page.swipe_group.is_visible() != is_swipe {
+        if page.swipe_group.get_visible() != is_swipe {
             page.swipe_group.set_visible(is_swipe);
         }
         if let Effects::Swipe { mode, clean_with_black } | Effects::SmoothWave { mode, clean_with_black } = self.lighting.effect {
@@ -796,9 +804,10 @@ impl App {
             if page.clean_row.is_active() != clean_with_black {
                 page.clean_row.set_active(clean_with_black);
             }
-            let clean_sensitive = mode == SwipeMode::Fill;
-            if page.clean_row.is_sensitive() != clean_sensitive {
-                page.clean_row.set_sensitive(clean_sensitive);
+            // Only the fill mode has anything to wipe.
+            let clean_applies = mode == SwipeMode::Fill;
+            if page.clean_row.get_visible() != clean_applies {
+                page.clean_row.set_visible(clean_applies);
             }
         }
 
@@ -807,33 +816,30 @@ impl App {
             return;
         };
         let active_slot = state.active_slot;
+        page.set_active_slot(active_slot);
 
-        let mut swatch_colors: [[u8; 3]; SLOT_COUNT] = [[0; 3]; SLOT_COUNT];
-        let mut slot_subtitles: [String; SLOT_COUNT] = Default::default();
-        for (slot_index, slot_lighting) in state.current.slots.iter().enumerate() {
-            swatch_colors[slot_index] = representative_color(slot_lighting);
-            slot_subtitles[slot_index] = slot_lighting.effect.to_string();
-        }
-        page.set_slot_colors(swatch_colors);
-        page.set_slot_rows(active_slot, slot_subtitles);
-
-        // Say so when the key cannot drive the slots, rather than letting
-        // the row description imply it works.
-        let sync_note = match &state.slot_sync {
-            SubsystemState::Unavailable { reason } => Some(format!("Fn+Space is not available here ({reason}). Pick a slot below.")),
-            SubsystemState::Degraded { reason } => Some(format!("Fn+Space may be out of step ({reason}). Pick a slot below to resync.")),
+        // Say so where the key would have been used, rather than letting
+        // "Fn+Space cycles them" imply something untrue on this machine.
+        let slot_note = match &state.slot_sync {
+            SubsystemState::Unavailable { reason } => Some(format!("Fn+Space is not available here ({reason}). Use these buttons instead.")),
+            SubsystemState::Degraded { reason } => Some(format!("Fn+Space may be out of step ({reason}). Pick a slot to resync.")),
             _ => None,
         };
-        page.set_slot_sync_note(sync_note.as_deref());
+        page.set_slot_note(slot_note.as_deref());
 
-        let slot_text = match active_slot {
-            SlotSelection::Off => "Backlight off".to_string(),
-            lit => format!("Slot {lit} of {SLOT_COUNT}"),
+        // --- Caption ---------------------------------------------------------
+        // One secondary line: which slot, and what it holds.
+        let slot_text = match active_slot.index() {
+            Some(slot_index) => {
+                let effect = state.current.slots[slot_index].effect;
+                format!("Slot {active_slot} of {SLOT_COUNT} \u{00b7} {effect}")
+            }
+            None => "Backlight off".to_string(),
         };
         if page.slot_label.text() != slot_text.as_str() {
             page.slot_label.set_text(&slot_text);
         }
-        if !page.slot_label.is_visible() {
+        if !page.slot_label.get_visible() {
             page.slot_label.set_visible(true);
         }
 
@@ -846,32 +852,6 @@ impl App {
         };
         page.preview.set_colors(preview_colors);
     }
-}
-
-/// One colour standing for a whole slot, for its list chip.
-///
-/// Effects that ignore the zone colours cannot be represented by them, so
-/// they get a neutral grey rather than a stale colour the keyboard is not
-/// showing.
-fn representative_color(lighting: &Lighting) -> [u8; 3] {
-    if !lighting.effect.takes_color_array() {
-        return [120, 120, 120];
-    }
-
-    let mut brightest: [u8; 3] = [0, 0, 0];
-    let mut brightest_sum: u32 = 0;
-    for zone in &lighting.rgb_zones {
-        if !zone.enabled {
-            continue;
-        }
-        let sum = u32::from(zone.rgb[0]) + u32::from(zone.rgb[1]) + u32::from(zone.rgb[2]);
-        if sum >= brightest_sum {
-            brightest_sum = sum;
-            brightest = zone.rgb;
-        }
-    }
-
-    brightest
 }
 
 /// Zone colours for the preview, or black for effects that do not use
