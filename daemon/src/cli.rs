@@ -8,7 +8,7 @@ use std::{convert::TryInto, path::PathBuf, process::ExitCode, str::FromStr};
 use aurora_protocol::{
     custom_effect::CustomEffect,
     effects::{Brightness, Direction, Effects},
-    ipc::{Request, Response, SlotSelection},
+    ipc::{Request, Response, SlotSelection, SubsystemState},
     profile::{arr_to_zones, Lighting, Profile, SLOT_COUNT},
 };
 use clap::{Args, Subcommand};
@@ -209,6 +209,10 @@ fn run_status() -> ExitCode {
         println!("settings: NOT SAVING ({message})");
     }
 
+    print_subsystem("fn+space", &state.slot_sync);
+    print_subsystem("hotkey", &state.hotkey);
+    print_subsystem("capture", &state.screen_capture);
+
     let mut saved_names: Vec<String> = Vec::new();
     for profile in &state.profiles {
         saved_names.push(profile.name.clone());
@@ -216,6 +220,16 @@ fn run_status() -> ExitCode {
     println!("saved:    {} profiles ({})", state.profiles.len(), saved_names.join(", "));
 
     ExitCode::SUCCESS
+}
+
+/// Only the states a user can act on are printed. A working subsystem is
+/// not news; an unavailable one is the line they paste into an issue.
+fn print_subsystem(label: &str, state: &SubsystemState) {
+    match state {
+        SubsystemState::Active | SubsystemState::Inactive | SubsystemState::Unknown => {}
+        SubsystemState::Degraded { reason } => println!("{label:9} degraded ({reason})"),
+        SubsystemState::Unavailable { reason } => println!("{label:9} unavailable ({reason})"),
+    }
 }
 
 fn run_slot(args: &SlotArgs) -> ExitCode {
@@ -333,7 +347,7 @@ fn apply_lighting_directly(lighting: &Lighting) -> ExitCode {
         }
     };
 
-    let engine = EffectManager::new(*keyboard, stop_signals);
+    let engine = EffectManager::new(*keyboard, stop_signals, None);
     engine.set_lighting(lighting.clone());
     engine.shutdown();
 

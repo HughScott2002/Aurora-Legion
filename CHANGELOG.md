@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Optional subsystems report their own state, so a feature that cannot
+  work on a given machine says so instead of failing quietly. Fn+Space
+  detection, the profile hotkey, and screen capture each report active,
+  degraded, unavailable with a reason, or inactive. `aurora status`
+  prints the ones a user can act on.
+- Opt-in tracing behind the `AURORA_TRACE` environment variable. The
+  daemon logs every ACPI event with its match verdict, every feature
+  report with its payload and result, the slot counter read at
+  acquisition, and a counter sample after each slot write. Off by
+  default, and rate limited when on.
+- `aurora slot` to show or select the active Fn+Space slot, and
+  `aurora set --slot N` to write one slot without selecting it.
+
 ### Changed
 
 - Profiles now own their slots. A profile holds one lighting
@@ -51,6 +66,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ambient frames per second or swipe mode could be detected as no change
   at all. Equality is now structural, with `same_variant` for the effect
   selector that wants the old behavior.
+- A single read error disabled Fn+Space detection for the life of the
+  process. Read errors are now told apart: an interrupted read retries,
+  dropped events report degraded rather than claiming everything is
+  fine, and anything else reopens the socket on a bounded backoff.
+- Tracing could write megabytes an hour while a software effect ran,
+  because every frame logged a line. Successful writes are now limited
+  to one line per second, carrying the count of writes since the last
+  one. Failures are never suppressed.
 
 ### Migration
 
@@ -63,14 +86,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   secured.
 - Profile files written by earlier versions still load; a flat file is
   lifted into all three slots.
-
-### Added
-
-- Opt-in tracing behind the `AURORA_TRACE` environment variable. The
-  daemon logs every ACPI event with its match verdict, every feature
-  report with its payload and result, the slot counter read at
-  acquisition, and a counter sample after each slot write. Off by
-  default, because software effects write continuously.
 
 ## [0.23.0] - 2026-07-26
 

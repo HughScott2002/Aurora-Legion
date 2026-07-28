@@ -16,7 +16,7 @@ use aurora_protocol::{
     custom_effect::CustomEffect,
     ipc::{
         CustomEffectSummary, DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus, ProfileSummary, Request, Response, ResponseEnvelope,
-        SlotSelection, MAX_CUSTOM_EFFECT_STEPS, MAX_SAVED_CUSTOM_EFFECTS, MAX_SAVED_PROFILES,
+        SlotSelection, Subsystem, SubsystemState, MAX_CUSTOM_EFFECT_STEPS, MAX_SAVED_CUSTOM_EFFECTS, MAX_SAVED_PROFILES,
     },
     profile::{Lighting, Profile, MAX_NAME_BYTES},
 };
@@ -67,6 +67,10 @@ pub enum Command {
     /// SIGTERM/SIGINT arrived; sent by the signal listener thread so the
     /// core wakes immediately instead of on its next tick.
     ShutdownSignal,
+    /// An optional subsystem changed state. Sent by the adapter that owns
+    /// it, so "Fn+Space does not work here" becomes protocol-visible
+    /// instead of a log line nobody reads.
+    SubsystemStatus { subsystem: Subsystem, state: SubsystemState },
 }
 
 /// A line queued for one client connection; the connection's writer thread
@@ -78,6 +82,9 @@ pub enum Outbound {
 }
 
 pub struct Core {
+    /// A sender back into this core's own queue, handed to components the
+    /// core creates (the effect engine) so they can report state.
+    command_tx: Sender<Command>,
     settings: Settings,
     current_profile: Profile,
     /// Which Fn+Space position is live. Aurora's own number after
@@ -109,15 +116,20 @@ pub struct Core {
     acquire_attempt_count: u32,
     next_acquire_at: Instant,
 
+    slot_sync: SubsystemState,
+    hotkey: SubsystemState,
+    screen_capture: SubsystemState,
+
     shutdown_requested: bool,
 }
 
-pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
+pub fn run(command_tx: &Sender<Command>, command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
     let settings = Settings::load_or_migrate();
     let current_profile = settings.current_profile.clone();
     let active_slot = settings.active_slot;
 
     let mut core = Core {
+        command_tx: command_tx.clone(),
         settings,
         current_profile,
         active_slot,
@@ -134,6 +146,9 @@ pub fn run(command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
         last_change_at: Instant::now(),
         acquire_attempt_count: 0,
         next_acquire_at: Instant::now(),
+        slot_sync: SubsystemState::Unknown,
+        hotkey: SubsystemState::Unknown,
+        screen_capture: SubsystemState::Inactive,
         shutdown_requested: false,
     };
 
@@ -208,7 +223,7 @@ impl Core {
                 let counter_result = slot_reader.read_slot_counter();
                 self.active_slot = anchor_slot(self.active_slot, counter_result);
 
-                let engine = EffectManager::new(*keyboard, self.stop_signals.clone());
+                let engine = EffectManager::new(*keyboard, self.stop_signals.clone(), Some(self.command_tx.clone()));
                 self.engine = Some(engine);
                 self.slot_reader = Some(slot_reader);
                 self.keyboard_status = KeyboardStatus::Connected;
@@ -250,7 +265,30 @@ impl Core {
             Command::ShutdownSignal => {
                 self.shutdown_requested = true;
             }
+            Command::SubsystemStatus { subsystem, state } => {
+                self.set_subsystem_state(subsystem, state);
+            }
         }
+    }
+
+    /// Store a subsystem's state, broadcasting only on a real change.
+    /// Adapters may report the same state repeatedly (a retrying capture
+    /// loop, a reconnecting socket); without this compare, each repeat
+    /// would be a broadcast to every client.
+    fn set_subsystem_state(&mut self, subsystem: Subsystem, state: SubsystemState) {
+        let slot = match subsystem {
+            Subsystem::SlotSync => &mut self.slot_sync,
+            Subsystem::Hotkey => &mut self.hotkey,
+            Subsystem::ScreenCapture => &mut self.screen_capture,
+        };
+
+        if *slot == state {
+            return;
+        }
+
+        eprintln!("core: {subsystem:?} is now {state:?}");
+        *slot = state;
+        self.broadcast_state();
     }
 
     /// Slow tick when the keyboard is healthy and nothing is pending; fast
@@ -678,6 +716,9 @@ impl Core {
             custom_effects,
             version: env!("CARGO_PKG_VERSION").to_string(),
             settings_error: self.settings_error.clone(),
+            slot_sync: self.slot_sync.clone(),
+            hotkey: self.hotkey.clone(),
+            screen_capture: self.screen_capture.clone(),
         }
     }
 

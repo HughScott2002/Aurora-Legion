@@ -254,6 +254,45 @@ pub enum KeyboardStatus {
     Error { message: String },
 }
 
+/// Parts of Aurora that depend on something the machine may not have: an
+/// ACPI event class, an X display, a screen capture portal. None of them
+/// are required for lighting to work, so each reports its own state rather
+/// than failing the daemon.
+///
+/// This exists because the alternative was a single line on stderr that
+/// nobody sees. A user whose Fn+Space is not detected needs the app to say
+/// so, not to silently behave as though the feature works.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum SubsystemState {
+    /// Working.
+    Active,
+    /// Working, but something was missed and its state may be wrong. The
+    /// slot watcher reports this after the kernel drops events: detection
+    /// still runs, but the slot number may have drifted.
+    Degraded { reason: String },
+    /// Not available on this machine or in this session, with the reason a
+    /// user could act on or report.
+    Unavailable { reason: String },
+    /// Available but not running right now. Screen capture only exists
+    /// while the Ambient effect plays.
+    Inactive,
+    /// Not determined yet. The state at daemon startup, before the
+    /// adapter threads have reported in.
+    Unknown,
+}
+
+/// Optional subsystems, as reported in [`DaemonState`].
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Subsystem {
+    /// Fn+Space detection through the ACPI netlink socket.
+    SlotSync,
+    /// The Meta+RightAlt profile hotkey.
+    Hotkey,
+    /// Screen capture for the Ambient effect.
+    ScreenCapture,
+}
+
 /// A saved profile as clients see it in a state broadcast. Bodies stay in
 /// the daemon: a broadcast carrying every profile and every custom effect
 /// body grows past [`MAX_LINE_BYTES`], and clients only render names.
@@ -288,6 +327,15 @@ pub struct DaemonState {
     /// working when persistence does not, so this is reported rather than
     /// fatal.
     pub settings_error: Option<String>,
+
+    /// Fn+Space detection. When this is not [`SubsystemState::Active`],
+    /// slots still work; they just have to be selected rather than
+    /// cycled with the key.
+    pub slot_sync: SubsystemState,
+    /// The Meta+RightAlt profile hotkey.
+    pub hotkey: SubsystemState,
+    /// Screen capture, used only by the Ambient effect.
+    pub screen_capture: SubsystemState,
 }
 
 #[cfg(test)]
@@ -310,6 +358,11 @@ mod tests {
             }],
             version: "0.24.0".to_string(),
             settings_error: None,
+            slot_sync: SubsystemState::Active,
+            hotkey: SubsystemState::Unavailable {
+                reason: "no display connection".to_string(),
+            },
+            screen_capture: SubsystemState::Inactive,
         }
     }
 
@@ -350,6 +403,26 @@ mod tests {
 
         assert!(matches!(parsed_response, ServerMessage::Response(_)));
         assert!(matches!(parsed_event, ServerMessage::Event(_)));
+    }
+
+    /// A degraded subsystem must survive the wire with its reason intact:
+    /// the reason is the whole point, since it is what a user reports.
+    #[test]
+    fn subsystem_state_round_trips_with_its_reason() {
+        let degraded = SubsystemState::Degraded {
+            reason: "kernel dropped events".to_string(),
+        };
+
+        let json = serde_json::to_string(&degraded).unwrap();
+        let parsed: SubsystemState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, degraded);
+
+        let unavailable = SubsystemState::Unavailable {
+            reason: "netlink family 'acpi_event' not found".to_string(),
+        };
+        let json = serde_json::to_string(&unavailable).unwrap();
+        let parsed: SubsystemState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, unavailable);
     }
 
     #[test]

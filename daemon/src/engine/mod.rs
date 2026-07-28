@@ -11,8 +11,11 @@ use crossbeam_channel::{Receiver, Sender};
 use aurora_protocol::{
     custom_effect::{CustomEffect, EffectType},
     effects::{Direction, Effects},
+    ipc::{Subsystem, SubsystemState},
     profile::{self, Lighting, COLOR_BYTE_COUNT},
 };
+
+use crate::core::Command;
 use legion_rgb_driver::{BaseEffects, Keyboard, SPEED_RANGE};
 use rand::{rng, rngs::ThreadRng};
 use std::{
@@ -57,12 +60,15 @@ struct Inner {
     rx: Receiver<Message>,
     stop_signals: StopSignals,
     device_error: Arc<AtomicBool>,
+    /// Where effects report subsystem state. `None` for the CLI's direct
+    /// apply path, which has no core to report to.
+    command_tx: Option<Sender<Command>>,
 }
 
 impl EffectManager {
     /// Takes an already-acquired keyboard. Acquisition (with retry and error
     /// classification) lives in `crate::keyboard`, not here.
-    pub fn new(keyboard: Keyboard, stop_signals: StopSignals) -> Self {
+    pub fn new(keyboard: Keyboard, stop_signals: StopSignals, command_tx: Option<Sender<Command>>) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<Message>(MESSAGE_QUEUE_CAPACITY);
         let device_error = Arc::new(AtomicBool::new(false));
 
@@ -71,6 +77,7 @@ impl EffectManager {
             rx,
             stop_signals: stop_signals.clone(),
             device_error: device_error.clone(),
+            command_tx,
         };
 
         let inner_handle = thread::spawn(move || loop {
@@ -204,6 +211,20 @@ impl Inner {
         self.stop_signals.store_false();
     }
 
+    /// Report an optional subsystem's state to the core. Effects use this
+    /// so a capture failure becomes visible state rather than a log line
+    /// nobody reads.
+    fn report_subsystem(&self, subsystem: Subsystem, state: SubsystemState) {
+        let Some(command_tx) = &self.command_tx else {
+            return;
+        };
+
+        let send_result = command_tx.send(Command::SubsystemStatus { subsystem, state });
+        if send_result.is_err() {
+            // Core is gone; the daemon is shutting down.
+        }
+    }
+
     fn apply_effect(&mut self, lighting: &mut Lighting, rng: &mut ThreadRng) {
         match lighting.effect {
             Effects::Static => {
@@ -233,6 +254,8 @@ impl Inner {
                 fps = fps.clamp(1, 60);
                 saturation_boost = saturation_boost.clamp(0.0, 1.0);
                 effects::ambient::play(self, fps, saturation_boost);
+                // play() returns when the effect is replaced or stopped.
+                self.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Inactive);
             }
             Effects::SmoothWave { mode, clean_with_black } => {
                 lighting.rgb_zones = profile::arr_to_zones([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 255]);

@@ -9,6 +9,8 @@ use fast_image_resize as fr;
 use fr::Resizer;
 use scrap::{Capturer, Display, Frame, TraitCapturer, TraitPixelBuffer};
 
+use aurora_protocol::ipc::{Subsystem, SubsystemState};
+
 use crate::engine::Inner;
 
 /// Wait this long before retrying when the screen capture setup fails.
@@ -32,14 +34,18 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
         let mut displays = match Display::all() {
             Ok(displays) => displays,
             Err(error) => {
-                eprintln!("ambient: could not enumerate displays: {error}");
+                let reason = format!("could not enumerate displays: {error}");
+                eprintln!("ambient: {reason}");
+                manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Unavailable { reason });
                 sleep_before_retry(manager);
                 continue;
             }
         };
 
         if displays.is_empty() {
-            eprintln!("ambient: no displays available for capture");
+            let reason = "no displays available for capture".to_string();
+            eprintln!("ambient: {reason}");
+            manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Unavailable { reason });
             sleep_before_retry(manager);
             continue;
         }
@@ -49,7 +55,9 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
         let mut capturer = match Capturer::new(display) {
             Ok(capturer) => capturer,
             Err(error) => {
-                eprintln!("ambient: could not begin capture: {error}");
+                let reason = format!("could not begin capture: {error}");
+                eprintln!("ambient: {reason}");
+                manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Unavailable { reason });
                 sleep_before_retry(manager);
                 continue;
             }
@@ -63,11 +71,23 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
         let seconds_per_frame = Duration::from_nanos(1_000_000_000 / u64::from(fps));
         let mut resizer = fr::Resizer::new();
 
+        // Reported once, from inside the loop rather than before it: a
+        // capturer that constructs and then never delivers a frame is the
+        // failure this is meant to catch, so "Active" has to mean a frame
+        // actually arrived. Reporting per frame would send tens of commands
+        // a second into a queue bounded at 64.
+        let mut reported_active = false;
+
         while !manager.stop_signals.keyboard_stop_signal.load(Ordering::SeqCst) {
             let now = Instant::now();
 
             match capturer.frame(seconds_per_frame) {
                 Ok(frame) => {
+                    if !reported_active {
+                        manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Active);
+                        reported_active = true;
+                    }
+
                     let processed = process_frame(frame, dimensions, &mut resizer, saturation_boost);
 
                     match processed {

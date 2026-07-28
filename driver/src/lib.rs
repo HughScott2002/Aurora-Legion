@@ -48,9 +48,16 @@ const FEATURE_REPORT_ID: u8 = 0xcc;
 const PAYLOAD_COLOR_OFFSET: usize = 5;
 
 /// Environment variable that turns on write and event tracing across the
-/// daemon. Tracing is a diagnostic for the Fn+Space slot race; it is off
-/// by default because software effects write continuously.
+/// daemon. Tracing is a diagnostic, never on in normal operation.
 pub const TRACE_ENV_VAR: &str = "AURORA_TRACE";
+
+/// Shortest gap between successful-write trace lines. Software effects
+/// write about forty times a second, which is thousands of lines a minute
+/// and megabytes an hour, and every one of those lines says the same
+/// thing. One line per interval carries the same signal at a bounded cost.
+///
+/// Failures are never rate limited: an error is the reason to be tracing.
+const TRACE_WRITE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// True when [`TRACE_ENV_VAR`] is set to anything other than empty or "0".
 /// Read once: the environment cannot change while the process runs, and
@@ -156,6 +163,11 @@ fn lock_hid_device(device: &SharedHidDevice) -> MutexGuard<'_, HidDevice> {
 /// evidence that separates "Aurora never wrote" from "Aurora wrote and the
 /// controller overwrote it afterwards".
 fn trace_feature_report(payload: &[u8; FEATURE_REPORT_BYTES], send_result: &std::result::Result<(), hidapi::HidError>) {
+    let is_failure = send_result.is_err();
+    let Some(suppressed_count) = claim_trace_slot(is_failure) else {
+        return;
+    };
+
     let mut zone_text = String::new();
     for zone_index in ZONE_RANGE {
         let byte_offset = PAYLOAD_COLOR_OFFSET + (zone_index as usize) * 3;
@@ -170,10 +182,45 @@ fn trace_feature_report(payload: &[u8; FEATURE_REPORT_BYTES], send_result: &std:
         Err(error) => format!("failed: {error}"),
     };
 
+    let suppressed_text = if suppressed_count == 0 {
+        String::new()
+    } else {
+        format!(" (+{suppressed_count} more since the last line)")
+    };
+
     let effect_byte = payload[2];
     let speed = payload[3];
     let brightness = payload[4];
-    eprintln!("trace: hid write effect={effect_byte:#04x} speed={speed} brightness={brightness} zones{zone_text} -> {outcome}");
+    eprintln!("trace: hid write effect={effect_byte:#04x} speed={speed} brightness={brightness} zones{zone_text} -> {outcome}{suppressed_text}");
+}
+
+/// Decide whether this write gets a trace line. Returns how many writes
+/// were suppressed since the last line, or `None` to stay quiet.
+///
+/// Failures always get a line, because a suppressed error is worse than no
+/// tracing at all.
+fn claim_trace_slot(is_failure: bool) -> Option<u64> {
+    static SUPPRESSED_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static LAST_LINE_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+    let mut last_line_at = match LAST_LINE_AT.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let now = std::time::Instant::now();
+    let is_due = match *last_line_at {
+        Some(previous) => now.duration_since(previous) >= TRACE_WRITE_INTERVAL,
+        None => true,
+    };
+
+    if !is_failure && !is_due {
+        SUPPRESSED_COUNT.fetch_add(1, Ordering::SeqCst);
+        return None;
+    }
+
+    *last_line_at = Some(now);
+    Some(SUPPRESSED_COUNT.swap(0, Ordering::SeqCst))
 }
 
 pub struct Keyboard {

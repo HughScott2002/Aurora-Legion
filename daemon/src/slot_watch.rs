@@ -20,8 +20,9 @@
 //! multicast group, and block on `recv`. Parsing is kept in pure functions
 //! over byte slices so it is unit-testable without a socket.
 
-use std::{io, mem, os::fd::RawFd, thread};
+use std::{io, mem, os::fd::RawFd, thread, time::Duration};
 
+use aurora_protocol::ipc::{Subsystem, SubsystemState};
 use crossbeam_channel::Sender;
 
 use crate::core::Command;
@@ -76,61 +77,161 @@ const LIGHT_PROFILE_EVENT_TYPES: [u32; 2] = [0xE6, 0xE600];
 /// family's GETFAMILY answer (family attrs plus its ops list).
 const RECV_BUFFER_BYTES: usize = 8192;
 
+/// Delays between attempts to reopen the socket after a read failure that
+/// is neither an interruption nor a dropped datagram. The last entry
+/// repeats until the attempt budget runs out.
+const REOPEN_BACKOFF: [Duration; 3] = [Duration::from_millis(500), Duration::from_secs(2), Duration::from_secs(5)];
+
+/// How many times to reopen the socket before giving up and reporting the
+/// subsystem unavailable. Bounded so a permanently broken socket cannot
+/// spin forever.
+const MAX_REOPEN_ATTEMPTS: u32 = 5;
+
 pub fn spawn(command_tx: Sender<Command>) {
     thread::spawn(move || {
+        run_listener(&command_tx);
+    });
+}
+
+fn report(command_tx: &Sender<Command>, state: SubsystemState) -> bool {
+    let command = Command::SubsystemStatus {
+        subsystem: Subsystem::SlotSync,
+        state,
+    };
+    command_tx.send(command).is_ok()
+}
+
+/// Why a listening session ended.
+enum ListenOutcome {
+    /// The core is gone; the daemon is shutting down.
+    CoreGone,
+    /// The socket failed in a way that needs a fresh one.
+    SocketFailed(String),
+}
+
+fn run_listener(command_tx: &Sender<Command>) {
+    let trace_enabled = legion_rgb_driver::trace_enabled();
+    let mut reopen_attempt: u32 = 0;
+
+    loop {
         let (socket, family_id) = match connect_acpi_events() {
             Ok(connected) => connected,
             Err(message) => {
+                // Setup failure is not retryable: the family is missing, or
+                // this is not Lenovo hardware. Say so once and stop.
                 eprintln!("slot_watch: {message}; Fn+Space detection disabled");
+                report(command_tx, SubsystemState::Unavailable { reason: message });
                 return;
             }
         };
 
-        let trace_enabled = legion_rgb_driver::trace_enabled();
-        let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
-        loop {
-            let received_bytes = match socket.recv(&mut buffer) {
-                Ok(received_bytes) => received_bytes,
-                Err(message) => {
-                    eprintln!("slot_watch: recv failed: {message}; listener stopped");
+        report(command_tx, SubsystemState::Active);
+        reopen_attempt = 0;
+
+        match listen(&socket, family_id, command_tx, trace_enabled) {
+            ListenOutcome::CoreGone => return,
+            ListenOutcome::SocketFailed(message) => {
+                reopen_attempt += 1;
+                if reopen_attempt > MAX_REOPEN_ATTEMPTS {
+                    let reason = format!("netlink socket kept failing ({message}) after {MAX_REOPEN_ATTEMPTS} attempts");
+                    eprintln!("slot_watch: {reason}; Fn+Space detection disabled");
+                    report(command_tx, SubsystemState::Unavailable { reason });
                     return;
                 }
-            };
 
-            // Every ACPI event is inspected, and under tracing every one is
-            // logged whether it matched or not. Without that, a missing
-            // Fn+Space reaction cannot be told apart from a tap that never
-            // reached the socket.
-            let datagram = &buffer[..received_bytes];
-            let events = parse_acpi_events(datagram, family_id);
-
-            let mut matched = false;
-            for event in &events {
-                let is_match = is_light_profile_event(event);
-                if is_match {
-                    matched = true;
-                }
-                if trace_enabled {
-                    let device_class = String::from_utf8_lossy(event.device_class);
-                    let bus_id = String::from_utf8_lossy(event.bus_id);
-                    let event_type = event.event_type;
-                    eprintln!("trace: acpi event class={device_class} bus={bus_id} type={event_type:#06x} match={is_match}");
-                }
-            }
-
-            if !matched {
-                continue;
-            }
-
-            // Do not time-debounce this event. Confirmed physical taps can
-            // arrive 140 ms apart; dropping one leaves the firmware's own
-            // slot profile visible instead of Aurora's logical slot.
-            let send_result = command_tx.send(Command::HardwareSlotEvent);
-            if send_result.is_err() {
-                return; // Core is gone; daemon is shutting down.
+                let backoff_index = ((reopen_attempt - 1) as usize).min(REOPEN_BACKOFF.len() - 1);
+                let delay = REOPEN_BACKOFF[backoff_index];
+                eprintln!("slot_watch: {message}; reopening the socket in {delay:?} (attempt {reopen_attempt})");
+                report(
+                    command_tx,
+                    SubsystemState::Degraded {
+                        reason: format!("reconnecting to the ACPI event socket ({message})"),
+                    },
+                );
+                thread::sleep(delay);
             }
         }
-    });
+    }
+}
+
+/// Block on the socket, forwarding every Fn+Space event, until the socket
+/// needs replacing.
+///
+/// Read errors are not all the same, and treating them the same is what
+/// made a single failure disable Fn+Space for the life of the process:
+///
+/// - `EINTR` means a signal arrived. Nothing was lost; read again.
+/// - `ENOBUFS` means the kernel dropped datagrams because this socket fell
+///   behind. Events were lost, so the slot count may now be wrong. The
+///   subsystem keeps running but reports degraded, because claiming Active
+///   here would be claiming a slot number we cannot vouch for.
+/// - Anything else needs a fresh socket.
+fn listen(socket: &NetlinkSocket, family_id: u16, command_tx: &Sender<Command>, trace_enabled: bool) -> ListenOutcome {
+    let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
+    let mut reported_dropped_events = false;
+
+    loop {
+        let received_bytes = match socket.recv(&mut buffer) {
+            Ok(received_bytes) => received_bytes,
+            Err(error) => {
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+
+                if error.raw_os_error() == Some(libc::ENOBUFS) {
+                    if !reported_dropped_events {
+                        eprintln!("slot_watch: the kernel dropped events; the active slot may be out of step");
+                        reported_dropped_events = true;
+                        let sent = report(
+                            command_tx,
+                            SubsystemState::Degraded {
+                                reason: "the kernel dropped Fn+Space events, so the active slot may be out of step".to_string(),
+                            },
+                        );
+                        if !sent {
+                            return ListenOutcome::CoreGone;
+                        }
+                    }
+                    continue;
+                }
+
+                return ListenOutcome::SocketFailed(error.to_string());
+            }
+        };
+
+        // Every ACPI event is inspected, and under tracing every one is
+        // logged whether it matched or not. Without that, a missing
+        // Fn+Space reaction cannot be told apart from a tap that never
+        // reached the socket.
+        let datagram = &buffer[..received_bytes];
+        let events = parse_acpi_events(datagram, family_id);
+
+        let mut matched = false;
+        for event in &events {
+            let is_match = is_light_profile_event(event);
+            if is_match {
+                matched = true;
+            }
+            if trace_enabled {
+                let device_class = String::from_utf8_lossy(event.device_class);
+                let bus_id = String::from_utf8_lossy(event.bus_id);
+                let event_type = event.event_type;
+                eprintln!("trace: acpi event class={device_class} bus={bus_id} type={event_type:#06x} match={is_match}");
+            }
+        }
+
+        if !matched {
+            continue;
+        }
+
+        // Do not time-debounce this event. Confirmed physical taps can
+        // arrive 140 ms apart; dropping one leaves the firmware's own
+        // slot profile visible instead of Aurora's logical slot.
+        let send_result = command_tx.send(Command::HardwareSlotEvent);
+        if send_result.is_err() {
+            return ListenOutcome::CoreGone;
+        }
+    }
 }
 
 /// Open a generic-netlink socket, resolve the `acpi_event` family and join
@@ -144,7 +245,9 @@ fn connect_acpi_events() -> Result<(NetlinkSocket, u16), String> {
     socket.send_to_kernel(&query)?;
 
     let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
-    let received_bytes = socket.recv(&mut buffer)?;
+    let received_bytes = socket
+        .recv(&mut buffer)
+        .map_err(|error| format!("could not read from netlink socket: {error}"))?;
     let family = match parse_family_reply(&buffer[..received_bytes]) {
         Some(family) => family,
         None => return Err(format!("netlink family '{ACPI_FAMILY_NAME}' not found")),
@@ -495,11 +598,14 @@ impl NetlinkSocket {
         Ok(())
     }
 
-    fn recv(&self, buffer: &mut [u8]) -> Result<usize, String> {
+    /// The raw error is preserved rather than flattened to a string: the
+    /// caller distinguishes EINTR, ENOBUFS and everything else, and a
+    /// string cannot carry that.
+    fn recv(&self, buffer: &mut [u8]) -> io::Result<usize> {
         // SAFETY: the pointer and length come from one live mutable slice.
         let received = unsafe { libc::recv(self.fd, buffer.as_mut_ptr().cast(), buffer.len(), 0) };
         if received < 0 {
-            return Err(format!("could not read from netlink socket: {}", io::Error::last_os_error()));
+            return Err(io::Error::last_os_error());
         }
         Ok(received as usize)
     }

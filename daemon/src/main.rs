@@ -97,7 +97,7 @@ fn run_daemon() {
 
     // The core loop runs on the main thread until a signal or a Shutdown
     // request arrives.
-    core::run(&command_rx, &shutdown_flag);
+    core::run(&command_tx, &command_rx, &shutdown_flag);
 
     let remove_result = std::fs::remove_file(&path);
     if let Err(error) = remove_result {
