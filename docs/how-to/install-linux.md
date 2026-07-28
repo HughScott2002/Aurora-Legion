@@ -66,7 +66,7 @@ packages and every installed file.
 
 ```console
 $ aurora status
-daemon:   running (v0.24.0)
+daemon:   running (v0.24.1)
 keyboard: connected
 ```
 

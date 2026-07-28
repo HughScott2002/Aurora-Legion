@@ -134,7 +134,7 @@ Inspect the daemon:
 
 ```console
 $ aurora status
-daemon:   running (v0.24.0)
+daemon:   running (v0.24.1)
 keyboard: connected
 profile:  (unsaved)
 slot:     1 of 3 (Static effect)

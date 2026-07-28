@@ -81,7 +81,7 @@ Handshake: send `Hello` first on every new connection.
 
 ```json
 {"id": 1, "req": {"type": "Hello", "protocol_version": 2}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 2, "daemon_version": "0.24.0"}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 2, "daemon_version": "0.24.1"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
@@ -188,7 +188,7 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [{"name": "gaming"}],
   "custom_effects": [{"name": "pulse", "step_count": 12, "should_loop": true}],
-  "version": "0.24.0",
+  "version": "0.24.1",
   "settings_error": null,
   "slot_sync": {"type": "Active"},
   "hotkey": {"type": "Unavailable", "reason": "no display connection"},
@@ -390,7 +390,7 @@ protocol, but hardware effects survive a daemon stop.
 
 ```text
 C: {"id":1,"req":{"type":"Hello","protocol_version":2}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":2,"daemon_version":"0.24.0"}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":2,"daemon_version":"0.24.1"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}
