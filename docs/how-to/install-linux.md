@@ -16,10 +16,10 @@ $ ldd --version
 Every install needs Aurora's udev rule:
 
 ```console
-$ curl -fsSLo /tmp/99-aurora.rules \
-    https://raw.githubusercontent.com/HughScott2002/Aurora-Legion/main/udev/99-aurora.rules
-$ sudo install -Dm644 /tmp/99-aurora.rules \
-    /etc/udev/rules.d/99-aurora.rules
+$ curl -fsSLo /tmp/70-aurora.rules \
+    https://raw.githubusercontent.com/HughScott2002/Aurora-Legion/main/udev/70-aurora.rules
+$ sudo install -Dm644 /tmp/70-aurora.rules \
+    /etc/udev/rules.d/70-aurora.rules
 $ sudo udevadm control --reload-rules
 $ sudo udevadm trigger
 ```

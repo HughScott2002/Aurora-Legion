@@ -33,7 +33,7 @@ stage_and_pack() {
   install -Dm644 gui/data/icons/hicolor/scalable/apps/io.github.HughScott2002.Aurora.svg \
     "$stage/share/icons/hicolor/scalable/apps/io.github.HughScott2002.Aurora.svg"
   install -Dm644 systemd/aurora.service "$stage/systemd/aurora.service"
-  install -Dm644 udev/99-aurora.rules "$stage/udev/99-aurora.rules"
+  install -Dm644 udev/70-aurora.rules "$stage/udev/70-aurora.rules"
   install -Dm755 contrib/tarball/install.sh "$stage/install.sh"
   install -Dm644 contrib/tarball/README.txt "$stage/README.txt"
 

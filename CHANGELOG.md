@@ -8,12 +8,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The shipped udev rules granted access to `/dev/hidraw*`, but the
+- The shipped udev rules granted nothing, so the documented install
+  ended in permission denied on any machine without hand-written rules.
+  Two faults, both needed fixing. They matched `/dev/hidraw*` while the
   driver builds hidapi with the libusb backend and opens the raw USB
-  node instead, so the documented install granted nothing and every
-  install path ended in permission denied on a machine with no other
-  rules. The rules now match the USB device node. Affects every release
-  up to and including 0.24.0 (#20).
+  node. And they were numbered 99, while systemd's `73-seat-late.rules`
+  is what turns the `uaccess` tag into an ACL, so a rule sorting after
+  it tags the device and never gets the ACL applied. The rules now match
+  the USB node and ship as `70-aurora.rules`, installed through
+  `services.udev.packages` rather than `services.udev.extraRules`, which
+  writes the too-late `99-local.rules`. Affects every release up to and
+  including 0.24.0 (#20).
 
 ## [0.24.0] - 2026-07-27
 

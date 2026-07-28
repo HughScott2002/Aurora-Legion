@@ -9,7 +9,7 @@ persistent daemon. The GUI and CLI are clients.
 
 - Ask before every command that uses `sudo`.
 - Outside the user's home directory, create only
-  `/etc/udev/rules.d/99-aurora.rules`.
+  `/etc/udev/rules.d/70-aurora.rules`.
 - Do not stop unrelated services or remove another lighting tool
   without permission.
 - Report failures. Use Aurora's troubleshooting guide instead of

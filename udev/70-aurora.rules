@@ -18,19 +18,30 @@
 # these rules cannot affect typing; the built-in keyboard is a separate
 # device, usually on the i8042 PS/2 controller.
 #
+# The 70- prefix is load-bearing. systemd's 73-seat-late.rules carries
+# the line that actually applies the ACL:
+#
+#   TAG=="uaccess", ENV{MAJOR}!="", RUN{builtin}+="uaccess"
+#
+# A rule numbered above 73 sets the tag after that line has already run,
+# so the tag is present on the device and the builtin never fires: the
+# device ends up tagged uaccess with no ACL on it. Anything that installs
+# these rules has to keep them sorting before 73, which rules out NixOS
+# `services.udev.extraRules` (it writes 99-local.rules); use
+# `services.udev.packages` instead.
+#
 # Manual install:
-#   sudo install -Dm644 99-aurora.rules /etc/udev/rules.d/99-aurora.rules
+#   sudo install -Dm644 70-aurora.rules /etc/udev/rules.d/70-aurora.rules
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 # then replug the keyboard (or reboot).
 #
 # TAG+="uaccess" grants access to whoever is logged in at the seat, which
 # is the right boundary: no group membership to hand out, and no access
 # for other users. It is a dynamic ACL applied by systemd-logind at
-# session activation, and it is dropped when udevd restarts (a distro
-# upgrade, or `nixos-rebuild switch`) until the session activates again.
-# If lighting stops after an upgrade and `aurora status` reports
-# permission denied, log out and back in. docs/how-to/troubleshoot.md
-# has the static fallback for setups where that is not acceptable.
+# session activation. If lighting stops after an upgrade and
+# `aurora status` reports permission denied, log out and back in;
+# docs/how-to/troubleshoot.md has the static fallback for setups where
+# that is not acceptable.
 
 # 2020
 SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c955", TAG+="uaccess"

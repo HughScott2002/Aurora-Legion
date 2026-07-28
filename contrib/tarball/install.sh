@@ -16,7 +16,7 @@ BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 UNIT_DIR="$HOME/.config/systemd/user"
-UDEV_RULES="/etc/udev/rules.d/99-aurora.rules"
+UDEV_RULES="/etc/udev/rules.d/70-aurora.rules"
 
 install_binaries() {
   install -Dm755 "$HERE/bin/aurora" "$BIN_DIR/aurora"
@@ -85,13 +85,13 @@ install_udev_rule() {
   printf "Install it now? [y/N] "
   read -r answer
   if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
-    sudo install -Dm644 "$HERE/udev/99-aurora.rules" "$UDEV_RULES"
+    sudo install -Dm644 "$HERE/udev/70-aurora.rules" "$UDEV_RULES"
     sudo udevadm control --reload-rules
     sudo udevadm trigger
     echo "installed: $UDEV_RULES (replug the keyboard or reboot)"
   else
     echo "skipped. Install it later with:"
-    echo "  sudo install -Dm644 $HERE/udev/99-aurora.rules $UDEV_RULES"
+    echo "  sudo install -Dm644 $HERE/udev/70-aurora.rules $UDEV_RULES"
     echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
   fi
 }
