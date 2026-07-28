@@ -14,8 +14,8 @@ and a working Fn+Space cycle.
 
 ## How-to guides
 
-- [Install on NixOS](how-to/install-nixos.md): install Aurora, enable
-  keyboard access and start the user service.
+- [Install on NixOS](how-to/install-nixos.md): one option with NixOS
+  alone, or split across NixOS and Home Manager.
 - [Install on other Linux](how-to/install-linux.md): use the AppImage or
   prebuilt tarball.
 - [Build from source](how-to/build-from-source.md): prepare the toolchain,
