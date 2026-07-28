@@ -9,6 +9,9 @@ Loading a custom effect from a file is the only way to get one, and
 nothing writes such a file. Export comes before in-app authoring. Full
 ordering: #17.
 
+- [ ] Drop the blanket `*.json` from `.gitignore` first. Both exported
+      formats are JSON, so example files would be silently ignored.
+      Hides nothing today. Issue: #12
 - [ ] Export a profile or custom effect from the GUI and the CLI.
       Issue: #17
 - [ ] Custom Effects empty state should say where a file comes from
@@ -26,3 +29,22 @@ guide shipped in 0.24.0. What is left of the HIG pass: #4.
 - [ ] Profiles and Custom Effects pages have had no HIG pass. Issue: #4
 - [ ] `GtkImage` baseline warnings on every list rebuild, from icon
       suffixes in the Profiles and Custom rows. Issue: #4
+
+## Release gate
+
+- [ ] Re-test the README claims against a release candidate. Never run
+      for 0.24.0 or 0.24.1, and the comparison table, every performance
+      figure, and the install instructions all changed in between.
+      Issue: #16
+- [ ] Install on a machine with no prior Aurora udev rules, following
+      `docs/how-to/install-linux.md` exactly. 0.24.0 shipped rules that
+      granted nothing, and the 0.24.1 fix is confirmed only on a machine
+      that already had Aurora working. Issue: #16, #20
+
+## Diagnostics
+
+- [ ] `aurora doctor`: enumerate the device, report whether the udev
+      rule is present and whether the ACL actually landed, socket path,
+      daemon and client versions. Subsystem states already carry half of
+      this. The ACL check is the one #20 was invisible against.
+      Issue: #3
