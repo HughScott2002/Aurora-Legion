@@ -31,11 +31,12 @@ The core module consumes them on the main thread.
 
 The core module alone mutates daemon state. It owns:
 
-- the current profile;
+- the live profile and its three lighting slots;
 - saved profiles and custom effects;
 - keyboard status;
 - the active Fn+Space slot;
 - settings persistence;
+- optional subsystem state;
 - subscriber snapshots.
 
 Server threads, signal handlers, hotkey listeners and the Fn+Space
@@ -59,6 +60,17 @@ causes keyboard reacquisition instead of a daemon panic.
 
 The ITE controller permits one open HID owner. Slot readback shares the
 driver's handle rather than opening a second handle.
+
+## Optional subsystems
+
+Fn+Space detection, the profile hotkey and screen capture each depend on
+something a given machine may not have. None of them is required for
+lighting, so none of them fails the daemon. Each reports its own state
+instead, and that state reaches clients in every snapshot.
+
+This exists because the alternative was one line on stderr that nobody
+reads. Aurora is tested on a single laptop model, so a feature that
+cannot work elsewhere has to say so where it would have been used.
 
 ## Clients
 
@@ -84,3 +96,4 @@ to reacquire hardware.
 - [Runtime files and limits](../reference/runtime-files.md)
 - [Code style and invariants](../style-guide.md)
 - [Fn+Space synchronization](fn-space-sync.md)
+- [Mature daemon and native GUI references](../research/mature-daemon-native-gui-references.md)

@@ -8,11 +8,11 @@ use std::{
 };
 
 use device_query::DeviceQuery;
-use aurora_protocol::profile::Profile;
+use aurora_protocol::profile::Lighting;
 
 use crate::engine::Inner;
 
-pub fn play(manager: &mut Inner, p: &Profile) {
+pub fn play(manager: &mut Inner, p: &Lighting) {
     let stop_signals = manager.stop_signals.clone();
 
     let kill_thread = Arc::new(AtomicBool::new(false));

@@ -1,9 +1,11 @@
 # Use Fn+Space slots
 
-Aurora remembers one lighting profile for each of three lit Fn+Space
-slots. The fourth state is off.
+Every profile holds three lightings, one per lit Fn+Space slot. The
+fourth state is off. Switching slots on the keyboard moves between three
+looks that belong to the same profile, and saving the profile saves all
+three.
 
-On first use, the slots are:
+A new profile starts:
 
 | Slot | Default |
 | --- | --- |
@@ -18,63 +20,80 @@ Existing settings keep their saved colors.
 
 ```console
 $ aurora status
-daemon:   running (v0.23.0)
+daemon:   running (v0.24.0)
 keyboard: connected
-hw slot:  1 of 3
+slot:     1 of 3 (Static effect)
 ```
 
 When the fourth state is active, status prints:
 
 ```text
-hw slot:  backlight off (Fn+Space)
+slot:     backlight off (Fn+Space)
 ```
 
-## Change a slot
+## Change slots
 
-Press Fn+Space until `aurora status` shows the slot you want. Apply a
-profile with the GUI or CLI.
+Three ways reach the same place, and all of them apply immediately:
 
-This example makes all four zones purple:
+- Press Fn+Space.
+- Click a slot in the app, at the top of the Lighting page.
+- Run `aurora slot 2`.
+
+```console
+$ aurora slot 2
+slot 2 selected
+```
+
+Aurora moves its own slot number. The hardware exposes no command to
+move the controller's counter, so selecting a slot in software and
+pressing the key are not quite the same operation, even though they look
+identical. [Fn+Space synchronization](../explanation/fn-space-sync.md)
+explains why.
+
+## Edit a slot
+
+Select the slot you want, then change its lighting. The app edits the
+selected slot, and `aurora set` writes to it:
 
 ```console
 $ aurora set -e Static \
     -c 128,0,255,128,0,255,128,0,255,128,0,255
-profile applied
+lighting applied
 ```
 
-Aurora stores the profile in the active lit slot. Switch away and back
-to confirm it returns.
+Switch away and back to confirm it returns.
 
-## Set each slot
+To write a slot you are not looking at, name it. The keyboard keeps
+showing the live slot:
 
-Repeat this sequence:
+```console
+$ aurora set --slot 3 -e Breath -c 0,0,255,0,0,255,0,0,255,0,0,255
+lighting applied
+```
 
-1. Press Fn+Space once.
-2. Wait until `aurora status` shows the intended slot.
-3. Apply the profile.
-
-Use a different visible color for each slot while testing. It makes a
-missed or extra event obvious.
+Use a different visible color per slot while testing. It makes a missed
+or extra event obvious.
 
 ## Understand off
 
-Off is not a saved lighting slot. A `set` command while status says
-`backlight off` lights the keyboard but does not overwrite slots 1
-through 3. Press Fn+Space to return to slot 1.
+Off is not a lighting slot. It holds nothing, and editing it is
+rejected: a change applied while the backlight is off would light the
+keyboard and then vanish at the next restart, because there is nowhere
+to store it. Select a lit slot first.
 
-Aurora counts every matching Fn+Space event, then waits 250 ms after
-the final event before writing. Rapid taps can show firmware lighting
+Aurora counts every matching Fn+Space event, then waits 250 ms after the
+final event before writing. Rapid taps can show firmware lighting
 briefly, but the final Aurora slot should win.
 
 If it does not, follow
 [Fn+Space troubleshooting](troubleshoot.md#fnspace-shows-firmware-rgb-or-darkness).
 
-## Current GUI limits
+## When Fn+Space is not detected
 
-The keyboard and daemon state switch correctly. The GUI preview, slot
-caption and color pickers do not always refresh together after a
-daemon broadcast. Check `aurora status` before editing when the GUI
-looks stale.
+Detection needs the ACPI event socket, and not every machine or kernel
+provides it. Aurora does not pretend otherwise: the app says so under
+the slot buttons, and `aurora status` prints the reason.
 
-This follow-up is tracked in
-[issue #14](https://github.com/HughScott2002/Aurora-Legion/issues/14).
+Slots still work. Select them in the app or with `aurora slot` instead
+of pressing the key. If your laptop lands here, the Settings page has a
+link to report it, and the model is the useful part of the report.

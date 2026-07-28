@@ -61,7 +61,7 @@ daemon:   running (v0.23.0)
 keyboard: connected
 $ aurora set -e Static \
     -c 255,0,0,0,255,0,0,0,255,255,255,255
-profile applied
+lighting applied
 ```
 
 Ask the user whether the four zones changed to red, green, blue and

@@ -34,11 +34,24 @@ colors expose it.
 ## The one trusted read
 
 Aurora reads the EC counter when it first acquires the keyboard, before
-it writes lighting. Values 1 through 3 select a remembered slot. Value
-4 means off.
+it writes lighting. It does not use later counter reads as slot
+identity.
 
-If the read fails or returns an unsettled value, Aurora starts from
-slot 1. It does not use later counter reads as slot identity.
+That one read is not the whole answer, though, and treating it as the
+whole answer is what used to replace a user's lighting with slot 1's at
+every startup. The counter and the stored selection each know something
+the other does not, so the decision splits by what each source actually
+knows:
+
+| Counter says | Stored selection says | Result | Why |
+| --- | --- | --- | --- |
+| Off | anything | Off | Only the controller knows the backlight was turned off while the daemon was down. |
+| Lit | A lit slot | The stored slot | Aurora's own writes moved the counter during the last session, so its number is not trustworthy. The stored one is. |
+| Lit | Off | Slot 1 | The user turned the backlight back on while the daemon was down, and nothing recorded where they landed. |
+| Unreadable, or mid-transition | anything | The stored slot | A source that cannot answer decides nothing. |
+
+The controller decides lit versus off. The stored selection decides
+which slot. Neither is trusted with the other's question.
 
 ## Count events, delay writes
 
@@ -76,19 +89,33 @@ Sending separate reports for each field replays stale intermediate
 state. Each report can also move the EC counter. One complete report
 reduces both problems to one write.
 
+## Selecting a slot in software
+
+A client can select a slot without the key, through `SelectSlot`. This
+moves Aurora's own slot number, which is the same number Fn+Space moves.
+It cannot move the controller's counter: the hardware exposes no such
+command.
+
+The two paths therefore share one apply path, so daemon state and the
+keyboard cannot disagree about which slot is live. A selection arriving
+while a Fn+Space settle is still pending inherits that settle rather
+than cancelling it. Applying inside the controller's own transition
+window is what leaves the keyboard dark.
+
 ## State exposed to clients
 
-The daemon reports `hardware_slot` as:
+The daemon reports `active_slot` as `"First"`, `"Second"`, `"Third"` or
+`"Off"`. The type is closed, so an out-of-range slot cannot be
+represented, let alone sent.
 
-| Value | Meaning |
-| --- | --- |
-| `1`, `2`, `3` | Aurora's remembered lighting slots |
-| `4` | Backlight off |
-| `null` | No active keyboard slot |
+This is Aurora's logical state after acquisition, not a live EC counter.
+Clients replace their local state with each full `StateChanged`
+snapshot.
 
-This is Aurora's logical state after acquisition, not a live EC
-counter. Clients replace their local state with each full
-`StateChanged` snapshot.
+Detection can also be absent. The daemon reports `slot_sync` separately
+from the slot itself, so a client can say that the key is not working on
+this machine instead of implying it is. Slots still work there; they
+have to be selected rather than cycled.
 
 ## Evidence
 

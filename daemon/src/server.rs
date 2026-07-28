@@ -3,7 +3,7 @@
 //! decision happens in the core.
 
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::Path,
     thread,
@@ -98,7 +98,12 @@ fn client_reader_loop(stream: UnixStream, command_tx: &Sender<Command>, out_tx: 
     loop {
         line.clear();
 
-        let read_result = reader.read_line(&mut line);
+        // Read through a limited reader so an oversized line is refused
+        // after MAX_LINE_BYTES, not after it has already been allocated.
+        // Reading first and checking the length afterwards let a peer make
+        // the daemon allocate any amount it liked, which is the opposite of
+        // what the bound is for.
+        let read_result = (&mut reader).take(MAX_LINE_BYTES as u64 + 1).read_line(&mut line);
         match read_result {
             Ok(0) => return, // EOF, client closed the connection.
             Ok(bytes_read) => {
@@ -155,6 +160,14 @@ fn client_writer_loop(stream: UnixStream, out_rx: &Receiver<Outbound>) {
                 continue;
             }
         };
+
+        // The reader on the other end disconnects on an oversized line, and
+        // then reconnects, and then receives the same oversized line. Drop
+        // it here instead of building that loop.
+        if json.len() > MAX_LINE_BYTES {
+            eprintln!("server: dropping a {} byte message, over the {MAX_LINE_BYTES} byte limit", json.len());
+            continue;
+        }
 
         let write_result = writeln!(writer, "{json}");
         if write_result.is_err() {

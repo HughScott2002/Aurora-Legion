@@ -1,7 +1,11 @@
 //! The Lighting page: keyboard preview on top, effect + colors + options
 //! below — modeled on GNOME Settings' Appearance panel.
 
-use aurora_protocol::effects::Effects;
+use aurora_protocol::{
+    effects::Effects,
+    ipc::{SlotSelection, LIT_SLOTS},
+    profile::SLOT_COUNT,
+};
 use relm4::{
     adw::{self, prelude::*},
     gtk::{self, gdk},
@@ -17,9 +21,17 @@ use crate::{
 pub struct LightingPage {
     pub root: gtk::Widget,
     pub preview: KeyboardPreview,
-    /// Caption under the preview naming the active EC hardware slot
-    /// (Fn+Space); hidden on machines where the slot cannot be read.
+    /// Caption under the preview naming the active slot.
     pub slot_label: gtk::Label,
+
+    /// Slot picker: linked toggle buttons, one per lit slot plus off.
+    /// Horizontal because four short choices in a column is a list
+    /// pretending to be a switch.
+    pub slot_buttons: [gtk::ToggleButton; SLOT_COUNT],
+    pub off_button: gtk::ToggleButton,
+    /// Shown only when Fn+Space cannot be trusted, where the key would
+    /// have been used.
+    pub slot_note: gtk::Label,
 
     pub effect_row: adw::ComboRow,
 
@@ -49,12 +61,75 @@ pub fn effect_names() -> Vec<&'static str> {
     names
 }
 
+/// Every slot button is the same width so the picker reads as one
+/// control rather than four differently sized ones.
+const SLOT_BUTTON_WIDTH_PX: i32 = 56;
+
 pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
     content.set_margin_top(18);
     content.set_margin_bottom(24);
     content.set_margin_start(12);
     content.set_margin_end(12);
+
+    // --- Slots -----------------------------------------------------------
+    // First on the page: every control below edits the selected slot, so
+    // a page ordered the other way has to be read bottom-up.
+    //
+    // No colour chips here. The keyboard is the display, and a chip beside
+    // the picker competes with the lit keys it is describing.
+    let slot_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    slot_box.add_css_class("linked");
+    slot_box.set_halign(gtk::Align::Center);
+
+    let mut slot_buttons: Vec<gtk::ToggleButton> = Vec::with_capacity(SLOT_COUNT);
+    for (slot_position, slot) in LIT_SLOTS.iter().enumerate() {
+        let button = gtk::ToggleButton::with_label(&format!("{}", slot_position + 1));
+        button.set_width_request(SLOT_BUTTON_WIDTH_PX);
+        button.set_tooltip_text(Some(&format!("Slot {}", slot_position + 1)));
+
+        let slot_sender = sender.clone();
+        let selected_slot = *slot;
+        button.connect_toggled(move |button| {
+            if !button.is_active() {
+                return; // The group deactivates the previous button too.
+            }
+            slot_sender.input(AppMsg::SlotSelected { slot: selected_slot });
+        });
+
+        slot_box.append(&button);
+        slot_buttons.push(button);
+    }
+
+    let off_button = gtk::ToggleButton::with_label("Off");
+    off_button.set_width_request(SLOT_BUTTON_WIDTH_PX);
+    off_button.set_tooltip_text(Some("Backlight off, the fourth Fn+Space position"));
+    let off_sender = sender.clone();
+    off_button.connect_toggled(move |button| {
+        if !button.is_active() {
+            return;
+        }
+        off_sender.input(AppMsg::SlotSelected { slot: SlotSelection::Off });
+    });
+    slot_box.append(&off_button);
+
+    // One group, so the buttons behave as a picker rather than four
+    // independent switches.
+    for button in &slot_buttons {
+        button.set_group(Some(&off_button));
+    }
+
+    let slot_note = gtk::Label::new(None);
+    slot_note.add_css_class("caption");
+    slot_note.add_css_class("dim-label");
+    slot_note.set_wrap(true);
+    slot_note.set_justify(gtk::Justification::Center);
+    slot_note.set_visible(false);
+
+    let slot_picker = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    slot_picker.append(&slot_box);
+    slot_picker.append(&slot_note);
+    content.append(&slot_picker);
 
     // --- Preview ---------------------------------------------------------
     // The preview and its slot caption sit in their own tighter box: the
@@ -149,6 +224,10 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let speed_adjustment = gtk::Adjustment::new(1.0, 1.0, 10.0, 1.0, 1.0, 0.0);
     let speed_row = adw::SpinRow::new(Some(&speed_adjustment), 1.0, 0);
     speed_row.set_title("Speed");
+    // Built hidden to match the default effect. `sync_lighting_page` decides
+    // from then on, but it only runs once daemon state arrives, so anything
+    // Static does not use would flash on screen first.
+    speed_row.set_visible(false);
     let speed_sender = sender.clone();
     // Signals go on the Adjustment (stable API) rather than the row.
     speed_adjustment.connect_value_changed(move |adjustment| {
@@ -169,6 +248,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let direction_row = adw::ComboRow::new();
     direction_row.set_title("Direction");
     direction_row.set_model(Some(&direction_model));
+    direction_row.set_visible(false);
     let direction_sender = sender.clone();
     direction_row.connect_selected_notify(move |row| {
         let index = row.selected();
@@ -183,6 +263,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Ambient-only options --------------------------------------------
     let ambient_group = adw::PreferencesGroup::new();
     ambient_group.set_title("Ambient Light");
+    ambient_group.set_visible(false);
 
     let fps_adjustment = gtk::Adjustment::new(30.0, 1.0, 60.0, 1.0, 5.0, 0.0);
     let fps_row = adw::SpinRow::new(Some(&fps_adjustment), 1.0, 0);
@@ -209,6 +290,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Swipe-only options ----------------------------------------------
     let swipe_group = adw::PreferencesGroup::new();
     swipe_group.set_title("Swipe");
+    swipe_group.set_visible(false);
 
     let swipe_mode_model = gtk::StringList::new(&["Change", "Fill"]);
     let swipe_mode_row = adw::ComboRow::new();
@@ -226,6 +308,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let clean_row = adw::SwitchRow::new();
     clean_row.set_title("Clean with Black");
     clean_row.set_subtitle("Wipe to black between fills");
+    // Only the fill mode wipes, so the switch has nothing to mean in the
+    // default change mode.
+    clean_row.set_visible(false);
     let clean_sender = sender.clone();
     clean_row.connect_active_notify(move |row| {
         clean_sender.input(AppMsg::CleanWithBlackPicked { clean: row.is_active() });
@@ -248,10 +333,18 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         Err(_) => unreachable!("exactly four zone buttons are created above"),
     };
 
+    let slot_buttons: [gtk::ToggleButton; SLOT_COUNT] = match slot_buttons.try_into() {
+        Ok(buttons) => buttons,
+        Err(_) => unreachable!("one button per lit slot is created above"),
+    };
+
     LightingPage {
         root: scrolled.upcast(),
         preview,
         slot_label,
+        slot_buttons,
+        off_button,
+        slot_note,
         effect_row,
         zone_buttons,
         colors_group,
@@ -264,6 +357,50 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         swipe_group,
         swipe_mode_row,
         clean_row,
+    }
+}
+
+impl LightingPage {
+    /// Move the picker to the daemon's slot. Compare before set: assigning
+    /// an already-active toggle still emits `toggled`, which would send the
+    /// selection straight back to the daemon.
+    pub fn set_active_slot(&self, active: SlotSelection) {
+        for (slot_position, button) in self.slot_buttons.iter().enumerate() {
+            let should_be_active = active.index() == Some(slot_position);
+            if button.is_active() != should_be_active {
+                button.set_active(should_be_active);
+            }
+        }
+
+        let off_should_be_active = active == SlotSelection::Off;
+        if self.off_button.is_active() != off_should_be_active {
+            self.off_button.set_active(off_should_be_active);
+        }
+    }
+
+    /// Say why the key cannot be trusted, next to the control that
+    /// replaces it. Nothing is shown when Fn+Space works, because a line
+    /// saying "working" is noise.
+    ///
+    /// `get_visible`, not `is_visible`: the latter is false whenever an
+    /// ancestor is hidden, which would skip the write and leave the label's
+    /// own flag stale until the page came back into view.
+    pub fn set_slot_note(&self, note: Option<&str>) {
+        match note {
+            Some(note) => {
+                if self.slot_note.text() != note {
+                    self.slot_note.set_text(note);
+                }
+                if !self.slot_note.get_visible() {
+                    self.slot_note.set_visible(true);
+                }
+            }
+            None => {
+                if self.slot_note.get_visible() {
+                    self.slot_note.set_visible(false);
+                }
+            }
+        }
     }
 }
 

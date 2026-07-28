@@ -2,25 +2,25 @@ use std::{sync::atomic::Ordering, thread, time::Duration};
 
 use aurora_protocol::{
     effects::{Direction, SwipeMode},
-    profile::Profile,
+    profile::Lighting,
 };
 
 use crate::engine::Inner;
 
 const STEPS: u8 = 150;
 
-pub fn play(manager: &mut Inner, profile: &Profile, mode: SwipeMode, clean_with_black: bool) {
-    let mut change_rgb_array = profile.rgb_array();
-    let fill_rgb_array = profile.rgb_array();
+pub fn play(manager: &mut Inner, lighting: &Lighting, mode: SwipeMode, clean_with_black: bool) {
+    let mut change_rgb_array = lighting.rgb_array();
+    let fill_rgb_array = lighting.rgb_array();
     // Placed here so we don't reset it every loop
     let mut used_colors_array: [u8; 12] = [0; 12];
 
-    let steps = STEPS / profile.speed;
+    let steps = STEPS / lighting.speed;
 
     while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
         match mode {
             SwipeMode::Change => {
-                match profile.direction {
+                match lighting.direction {
                     Direction::Left => change_rgb_array.rotate_right(3),
                     Direction::Right => change_rgb_array.rotate_left(3),
                 }
@@ -29,7 +29,7 @@ pub fn play(manager: &mut Inner, profile: &Profile, mode: SwipeMode, clean_with_
                 }
             }
             SwipeMode::Fill => {
-                let zone_order: Vec<usize> = match profile.direction {
+                let zone_order: Vec<usize> = match lighting.direction {
                     Direction::Left => (0..4).collect(),
                     Direction::Right => (0..4).rev().collect(),
                 };

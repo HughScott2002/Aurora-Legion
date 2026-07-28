@@ -8,6 +8,7 @@
 
 use std::{panic, thread, time::Duration};
 
+use aurora_protocol::ipc::{Subsystem, SubsystemState};
 use crossbeam_channel::Sender;
 use device_query::{DeviceQuery, DeviceState, Keycode};
 
@@ -22,10 +23,23 @@ pub fn spawn(command_tx: Sender<Command>) {
         let state = match panic::catch_unwind(DeviceState::new) {
             Ok(state) => state,
             Err(_) => {
-                eprintln!("hotkey: no display connection, Meta+RAlt cycling disabled");
+                let reason = "no display connection; device_query needs X11 or XWayland".to_string();
+                eprintln!("hotkey: {reason}, Meta+RAlt cycling disabled");
+                let _ = command_tx.send(Command::SubsystemStatus {
+                    subsystem: Subsystem::Hotkey,
+                    state: SubsystemState::Unavailable { reason },
+                });
                 return;
             }
         };
+
+        let announced = command_tx.send(Command::SubsystemStatus {
+            subsystem: Subsystem::Hotkey,
+            state: SubsystemState::Active,
+        });
+        if announced.is_err() {
+            return; // Core is gone; daemon is shutting down.
+        }
 
         let mut lock_switching = false;
 

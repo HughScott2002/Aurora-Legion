@@ -3,7 +3,7 @@ use hidapi::{HidApi, HidDevice};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, OnceLock,
     },
     thread,
     time::Duration,
@@ -43,6 +43,35 @@ const FEATURE_REPORT_BYTES: usize = 33;
 
 /// Report ID of the lighting feature report.
 const FEATURE_REPORT_ID: u8 = 0xcc;
+
+/// Offset of the first zone's red byte inside a feature report.
+const PAYLOAD_COLOR_OFFSET: usize = 5;
+
+/// Environment variable that turns on write and event tracing across the
+/// daemon. Tracing is a diagnostic, never on in normal operation.
+pub const TRACE_ENV_VAR: &str = "AURORA_TRACE";
+
+/// Shortest gap between successful-write trace lines. Software effects
+/// write about forty times a second, which is thousands of lines a minute
+/// and megabytes an hour, and every one of those lines says the same
+/// thing. One line per interval carries the same signal at a bounded cost.
+///
+/// Failures are never rate limited: an error is the reason to be tracing.
+const TRACE_WRITE_INTERVAL: Duration = Duration::from_secs(1);
+
+/// True when [`TRACE_ENV_VAR`] is set to anything other than empty or "0".
+/// Read once: the environment cannot change while the process runs, and
+/// this is called on every keyboard write.
+pub fn trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+
+    let enabled = ENABLED.get_or_init(|| match std::env::var(TRACE_ENV_VAR) {
+        Ok(value) => !value.is_empty() && value != "0",
+        Err(_) => false,
+    });
+
+    *enabled
+}
 
 pub enum BaseEffects {
     Static,
@@ -89,7 +118,8 @@ impl LightingState {
         payload[4] = self.brightness;
 
         if let BaseEffects::Static | BaseEffects::Breath = self.effect_type {
-            payload[5..17].copy_from_slice(&self.rgb_values);
+            let color_end = PAYLOAD_COLOR_OFFSET + self.rgb_values.len();
+            payload[PAYLOAD_COLOR_OFFSET..color_end].copy_from_slice(&self.rgb_values);
         };
 
         Ok(payload)
@@ -128,6 +158,71 @@ fn lock_hid_device(device: &SharedHidDevice) -> MutexGuard<'_, HidDevice> {
     }
 }
 
+/// One line per feature report that reached the controller, so a traced
+/// session shows exactly what Aurora sent and when. This is the only
+/// evidence that separates "Aurora never wrote" from "Aurora wrote and the
+/// controller overwrote it afterwards".
+fn trace_feature_report(payload: &[u8; FEATURE_REPORT_BYTES], send_result: &std::result::Result<(), hidapi::HidError>) {
+    let is_failure = send_result.is_err();
+    let Some(suppressed_count) = claim_trace_slot(is_failure) else {
+        return;
+    };
+
+    let mut zone_text = String::new();
+    for zone_index in ZONE_RANGE {
+        let byte_offset = PAYLOAD_COLOR_OFFSET + (zone_index as usize) * 3;
+        let red = payload[byte_offset];
+        let green = payload[byte_offset + 1];
+        let blue = payload[byte_offset + 2];
+        zone_text.push_str(&format!(" {red:02x}{green:02x}{blue:02x}"));
+    }
+
+    let outcome = match send_result {
+        Ok(()) => "ok".to_string(),
+        Err(error) => format!("failed: {error}"),
+    };
+
+    let suppressed_text = if suppressed_count == 0 {
+        String::new()
+    } else {
+        format!(" (+{suppressed_count} more since the last line)")
+    };
+
+    let effect_byte = payload[2];
+    let speed = payload[3];
+    let brightness = payload[4];
+    eprintln!("trace: hid write effect={effect_byte:#04x} speed={speed} brightness={brightness} zones{zone_text} -> {outcome}{suppressed_text}");
+}
+
+/// Decide whether this write gets a trace line. Returns how many writes
+/// were suppressed since the last line, or `None` to stay quiet.
+///
+/// Failures always get a line, because a suppressed error is worse than no
+/// tracing at all.
+fn claim_trace_slot(is_failure: bool) -> Option<u64> {
+    static SUPPRESSED_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static LAST_LINE_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+    let mut last_line_at = match LAST_LINE_AT.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let now = std::time::Instant::now();
+    let is_due = match *last_line_at {
+        Some(previous) => now.duration_since(previous) >= TRACE_WRITE_INTERVAL,
+        None => true,
+    };
+
+    if !is_failure && !is_due {
+        SUPPRESSED_COUNT.fetch_add(1, Ordering::SeqCst);
+        return None;
+    }
+
+    *last_line_at = Some(now);
+    Some(SUPPRESSED_COUNT.swap(0, Ordering::SeqCst))
+}
+
 pub struct Keyboard {
     keyboard_hid: SharedHidDevice,
     current_state: LightingState,
@@ -142,7 +237,14 @@ impl Keyboard {
         // Propagate instead of unwrapping: this is the call that fails when
         // the keyboard is unplugged, and callers need to see that error.
         let device = lock_hid_device(&self.keyboard_hid);
-        device.send_feature_report(&payload)?;
+        let send_result = device.send_feature_report(&payload);
+        drop(device); // Release the handle before formatting a trace line.
+
+        if trace_enabled() {
+            trace_feature_report(&payload, &send_result);
+        }
+
+        send_result?;
 
         Ok(())
     }

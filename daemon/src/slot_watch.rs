@@ -20,8 +20,14 @@
 //! multicast group, and block on `recv`. Parsing is kept in pure functions
 //! over byte slices so it is unit-testable without a socket.
 
-use std::{io, mem, os::fd::RawFd, thread};
+use std::{
+    io, mem,
+    os::fd::RawFd,
+    thread,
+    time::{Duration, Instant},
+};
 
+use aurora_protocol::ipc::{Subsystem, SubsystemState};
 use crossbeam_channel::Sender;
 
 use crate::core::Command;
@@ -76,40 +82,176 @@ const LIGHT_PROFILE_EVENT_TYPES: [u32; 2] = [0xE6, 0xE600];
 /// family's GETFAMILY answer (family attrs plus its ops list).
 const RECV_BUFFER_BYTES: usize = 8192;
 
+/// Delays between attempts to reopen the socket after a read failure that
+/// is neither an interruption nor a dropped datagram. The last entry
+/// repeats until the attempt budget runs out.
+const REOPEN_BACKOFF: [Duration; 3] = [Duration::from_millis(500), Duration::from_secs(2), Duration::from_secs(5)];
+
+/// How many times to reopen the socket before giving up and reporting the
+/// subsystem unavailable. Bounded so a permanently broken socket cannot
+/// spin forever.
+const MAX_REOPEN_ATTEMPTS: u32 = 5;
+
+/// A listening session that lasts this long has proved the socket works, so
+/// its eventual failure starts a fresh reopen budget. Anything shorter keeps
+/// counting against the current one.
+const MIN_HEALTHY_SESSION: Duration = Duration::from_secs(60);
+
 pub fn spawn(command_tx: Sender<Command>) {
     thread::spawn(move || {
+        run_listener(&command_tx);
+    });
+}
+
+fn report(command_tx: &Sender<Command>, state: SubsystemState) -> bool {
+    let command = Command::SubsystemStatus {
+        subsystem: Subsystem::SlotSync,
+        state,
+    };
+    command_tx.send(command).is_ok()
+}
+
+/// Why a listening session ended.
+enum ListenOutcome {
+    /// The core is gone; the daemon is shutting down.
+    CoreGone,
+    /// The socket failed in a way that needs a fresh one.
+    SocketFailed(String),
+}
+
+fn run_listener(command_tx: &Sender<Command>) {
+    let trace_enabled = legion_rgb_driver::trace_enabled();
+    let mut reopen_attempt: u32 = 0;
+
+    loop {
         let (socket, family_id) = match connect_acpi_events() {
             Ok(connected) => connected,
             Err(message) => {
+                // Setup failure is not retryable: the family is missing, or
+                // this is not Lenovo hardware. Say so once and stop.
                 eprintln!("slot_watch: {message}; Fn+Space detection disabled");
+                report(command_tx, SubsystemState::Unavailable { reason: message });
                 return;
             }
         };
 
-        let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
-        loop {
-            let received_bytes = match socket.recv(&mut buffer) {
-                Ok(received_bytes) => received_bytes,
-                Err(message) => {
-                    eprintln!("slot_watch: recv failed: {message}; listener stopped");
+        report(command_tx, SubsystemState::Active);
+
+        let session_start = Instant::now();
+        match listen(&socket, family_id, command_tx, trace_enabled) {
+            ListenOutcome::CoreGone => return,
+            ListenOutcome::SocketFailed(message) => {
+                // Clear the budget only after a session that ran long enough
+                // to prove the socket works. Clearing it on every successful
+                // connect instead puts the reset after each failure, so the
+                // attempt cap can never be reached and a permanently broken
+                // socket reopens forever.
+                let session = session_start.elapsed();
+                if session >= MIN_HEALTHY_SESSION {
+                    reopen_attempt = 0;
+                }
+
+                reopen_attempt += 1;
+                if reopen_attempt > MAX_REOPEN_ATTEMPTS {
+                    let reason = format!("netlink socket kept failing ({message}) after {MAX_REOPEN_ATTEMPTS} attempts");
+                    eprintln!("slot_watch: {reason}; Fn+Space detection disabled");
+                    report(command_tx, SubsystemState::Unavailable { reason });
                     return;
                 }
-            };
 
-            let datagram = &buffer[..received_bytes];
-            if !is_light_profile_event(datagram, family_id) {
-                continue;
-            }
-
-            // Do not time-debounce this event. Confirmed physical taps can
-            // arrive 140 ms apart; dropping one leaves the firmware's own
-            // slot profile visible instead of Aurora's logical slot.
-            let send_result = command_tx.send(Command::HardwareSlotEvent);
-            if send_result.is_err() {
-                return; // Core is gone; daemon is shutting down.
+                let backoff_index = ((reopen_attempt - 1) as usize).min(REOPEN_BACKOFF.len() - 1);
+                let delay = REOPEN_BACKOFF[backoff_index];
+                eprintln!("slot_watch: {message}; reopening the socket in {delay:?} (attempt {reopen_attempt})");
+                report(
+                    command_tx,
+                    SubsystemState::Degraded {
+                        reason: format!("reconnecting to the ACPI event socket ({message})"),
+                    },
+                );
+                thread::sleep(delay);
             }
         }
-    });
+    }
+}
+
+/// Block on the socket, forwarding every Fn+Space event, until the socket
+/// needs replacing.
+///
+/// Read errors are not all the same, and treating them the same is what
+/// made a single failure disable Fn+Space for the life of the process:
+///
+/// - `EINTR` means a signal arrived. Nothing was lost; read again.
+/// - `ENOBUFS` means the kernel dropped datagrams because this socket fell
+///   behind. Events were lost, so the slot count may now be wrong. The
+///   subsystem keeps running but reports degraded, because claiming Active
+///   here would be claiming a slot number we cannot vouch for.
+/// - Anything else needs a fresh socket.
+fn listen(socket: &NetlinkSocket, family_id: u16, command_tx: &Sender<Command>, trace_enabled: bool) -> ListenOutcome {
+    let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
+    let mut reported_dropped_events = false;
+
+    loop {
+        let received_bytes = match socket.recv(&mut buffer) {
+            Ok(received_bytes) => received_bytes,
+            Err(error) => {
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+
+                if error.raw_os_error() == Some(libc::ENOBUFS) {
+                    if !reported_dropped_events {
+                        eprintln!("slot_watch: the kernel dropped events; the active slot may be out of step");
+                        reported_dropped_events = true;
+                        let sent = report(
+                            command_tx,
+                            SubsystemState::Degraded {
+                                reason: "the kernel dropped Fn+Space events, so the active slot may be out of step".to_string(),
+                            },
+                        );
+                        if !sent {
+                            return ListenOutcome::CoreGone;
+                        }
+                    }
+                    continue;
+                }
+
+                return ListenOutcome::SocketFailed(error.to_string());
+            }
+        };
+
+        // Every ACPI event is inspected, and under tracing every one is
+        // logged whether it matched or not. Without that, a missing
+        // Fn+Space reaction cannot be told apart from a tap that never
+        // reached the socket.
+        let datagram = &buffer[..received_bytes];
+        let events = parse_acpi_events(datagram, family_id);
+
+        let mut matched = false;
+        for event in &events {
+            let is_match = is_light_profile_event(event);
+            if is_match {
+                matched = true;
+            }
+            if trace_enabled {
+                let device_class = String::from_utf8_lossy(event.device_class);
+                let bus_id = String::from_utf8_lossy(event.bus_id);
+                let event_type = event.event_type;
+                eprintln!("trace: acpi event class={device_class} bus={bus_id} type={event_type:#06x} match={is_match}");
+            }
+        }
+
+        if !matched {
+            continue;
+        }
+
+        // Do not time-debounce this event. Confirmed physical taps can
+        // arrive 140 ms apart; dropping one leaves the firmware's own
+        // slot profile visible instead of Aurora's logical slot.
+        let send_result = command_tx.send(Command::HardwareSlotEvent);
+        if send_result.is_err() {
+            return ListenOutcome::CoreGone;
+        }
+    }
 }
 
 /// Open a generic-netlink socket, resolve the `acpi_event` family and join
@@ -123,7 +265,9 @@ fn connect_acpi_events() -> Result<(NetlinkSocket, u16), String> {
     socket.send_to_kernel(&query)?;
 
     let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
-    let received_bytes = socket.recv(&mut buffer)?;
+    let received_bytes = socket
+        .recv(&mut buffer)
+        .map_err(|error| format!("could not read from netlink socket: {error}"))?;
     let family = match parse_family_reply(&buffer[..received_bytes]) {
         Some(family) => family,
         None => return Err(format!("netlink family '{ACPI_FAMILY_NAME}' not found")),
@@ -292,10 +436,20 @@ fn parse_family_reply(datagram: &[u8]) -> Option<AcpiFamily> {
     None
 }
 
-/// True when the datagram carries the GameZone light-profile-change WMI
-/// event: an `acpi_event` message whose embedded `acpi_genl_event` has
-/// device class `"wmi"` and the 0xE600 event type.
-fn is_light_profile_event(datagram: &[u8], family_id: u16) -> bool {
+/// One `acpi_genl_event` lifted out of a datagram. The string fields borrow
+/// the receive buffer and are already trimmed at their first nul.
+struct AcpiEvent<'a> {
+    device_class: &'a [u8],
+    bus_id: &'a [u8],
+    event_type: u32,
+}
+
+/// Every ACPI event carried by one datagram of the `acpi_event` family.
+/// Malformed or truncated messages are skipped rather than reported: the
+/// kernel is the peer here, and a short read is not worth a daemon error.
+fn parse_acpi_events(datagram: &[u8], family_id: u16) -> Vec<AcpiEvent<'_>> {
+    let mut events: Vec<AcpiEvent<'_>> = Vec::new();
+
     for message in split_messages(datagram) {
         if message.message_type != family_id {
             continue;
@@ -320,27 +474,36 @@ fn is_light_profile_event(datagram: &[u8], family_id: u16) -> bool {
             let Some(device_class) = attr_payload.get(..DEVICE_CLASS_BYTES) else {
                 continue;
             };
-            if !nul_terminated_matches(device_class, WMI_DEVICE_CLASS) {
-                continue;
-            }
-
             let Some(bus_id) = attr_payload.get(DEVICE_CLASS_BYTES..DEVICE_CLASS_BYTES + BUS_ID_BYTES) else {
                 continue;
             };
-            if !nul_terminated_starts_with(bus_id, WMI_BUS_ID_PREFIX) {
-                continue;
-            }
-
             let Some(event_type) = read_u32_ne(attr_payload, EVENT_TYPE_OFFSET) else {
                 continue;
             };
-            if LIGHT_PROFILE_EVENT_TYPES.contains(&event_type) {
-                return true;
-            }
+
+            events.push(AcpiEvent {
+                device_class: nul_terminated_str(device_class),
+                bus_id: nul_terminated_str(bus_id),
+                event_type,
+            });
         }
     }
 
-    false
+    events
+}
+
+/// True when this event is the GameZone light-profile-change WMI
+/// notification: device class `"wmi"`, the Lenovo WMI mapper device, and
+/// one of the two observed encodings of DSDT notify ID 0xE6.
+fn is_light_profile_event(event: &AcpiEvent<'_>) -> bool {
+    if event.device_class != WMI_DEVICE_CLASS.as_bytes() {
+        return false;
+    }
+    if !event.bus_id.starts_with(WMI_BUS_ID_PREFIX.as_bytes()) {
+        return false;
+    }
+
+    LIGHT_PROFILE_EVENT_TYPES.contains(&event.event_type)
 }
 
 // --- Byte helpers --------------------------------------------------------
@@ -377,11 +540,6 @@ fn write_u32_ne(bytes: &mut [u8], offset: usize, value: u32) {
 /// Compare a fixed-size, nul-padded C string field against `expected`.
 fn nul_terminated_matches(field: &[u8], expected: &str) -> bool {
     nul_terminated_str(field) == expected.as_bytes()
-}
-
-/// True when the nul-terminated C string in `field` starts with `prefix`.
-fn nul_terminated_starts_with(field: &[u8], prefix: &str) -> bool {
-    nul_terminated_str(field).starts_with(prefix.as_bytes())
 }
 
 /// The bytes of a fixed-size, nul-padded C string field up to its first nul.
@@ -460,11 +618,14 @@ impl NetlinkSocket {
         Ok(())
     }
 
-    fn recv(&self, buffer: &mut [u8]) -> Result<usize, String> {
+    /// The raw error is preserved rather than flattened to a string: the
+    /// caller distinguishes EINTR, ENOBUFS and everything else, and a
+    /// string cannot carry that.
+    fn recv(&self, buffer: &mut [u8]) -> io::Result<usize> {
         // SAFETY: the pointer and length come from one live mutable slice.
         let received = unsafe { libc::recv(self.fd, buffer.as_mut_ptr().cast(), buffer.len(), 0) };
         if received < 0 {
-            return Err(format!("could not read from netlink socket: {}", io::Error::last_os_error()));
+            return Err(io::Error::last_os_error());
         }
         Ok(received as usize)
     }
@@ -534,6 +695,18 @@ mod tests {
         message
     }
 
+    /// The old single-call shape, kept so each test still reads as one
+    /// question about one datagram.
+    fn datagram_matches(datagram: &[u8], family_id: u16) -> bool {
+        let events = parse_acpi_events(datagram, family_id);
+        for event in &events {
+            if is_light_profile_event(event) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn sample_acpi_event(device_class: &str, bus_id: &str, event_type: u32) -> Vec<u8> {
         let mut event = vec![0u8; DEVICE_CLASS_BYTES + BUS_ID_BYTES + 1 + 8];
         event[..device_class.len()].copy_from_slice(device_class.as_bytes());
@@ -598,13 +771,13 @@ mod tests {
         let mut raw_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut raw_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE6));
         let raw_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &raw_attrs);
-        assert!(is_light_profile_event(&raw_datagram, 24));
+        assert!(datagram_matches(&raw_datagram, 24));
 
         // Packed form, as maniac103's 2021 trace reports it.
         let mut packed_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut packed_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE600));
         let packed_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &packed_attrs);
-        assert!(is_light_profile_event(&packed_datagram, 24));
+        assert!(datagram_matches(&packed_datagram, 24));
     }
 
     #[test]
@@ -613,31 +786,31 @@ mod tests {
         let mut battery_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut battery_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("battery", "PNP0C0A:00", 0xE6));
         let battery_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &battery_attrs);
-        assert!(!is_light_profile_event(&battery_datagram, 24));
+        assert!(!datagram_matches(&battery_datagram, 24));
 
         // Wrong bus id (a WMI event from some other mapper device).
         let mut other_wmi_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut other_wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "OTHER123:00", 0xE6));
         let other_wmi_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &other_wmi_attrs);
-        assert!(!is_light_profile_event(&other_wmi_datagram, 24));
+        assert!(!datagram_matches(&other_wmi_datagram, 24));
 
         // Wrong event type: the 0xE8 event that accompanies every press,
         // and the thermal-mode hotkey.
         let mut companion_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut companion_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE8));
         let companion_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &companion_attrs);
-        assert!(!is_light_profile_event(&companion_datagram, 24));
+        assert!(!datagram_matches(&companion_datagram, 24));
 
         let mut thermal_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut thermal_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xD000));
         let thermal_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &thermal_attrs);
-        assert!(!is_light_profile_event(&thermal_datagram, 24));
+        assert!(!datagram_matches(&thermal_datagram, 24));
 
         // Wrong family id entirely.
         let mut wmi_attrs: Vec<u8> = Vec::new();
         push_attribute(&mut wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE6));
         let wrong_family_datagram = wrap_in_message(30, ACPI_GENL_CMD_EVENT, &wmi_attrs);
-        assert!(!is_light_profile_event(&wrong_family_datagram, 24));
+        assert!(!datagram_matches(&wrong_family_datagram, 24));
     }
 
     #[test]
@@ -649,7 +822,7 @@ mod tests {
         for cut in 0..datagram.len() {
             let truncated = &datagram[..cut];
             // Must never panic; the result value does not matter.
-            let _ = is_light_profile_event(truncated, 24);
+            let _ = datagram_matches(truncated, 24);
             let _ = parse_family_reply(truncated);
         }
     }

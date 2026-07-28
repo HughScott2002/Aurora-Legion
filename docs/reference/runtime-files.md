@@ -9,6 +9,7 @@
 | Settings | `$XDG_CONFIG_HOME/aurora/settings.json` | Daemon |
 | Default settings | `~/.config/aurora/settings.json` | Daemon |
 | Invalid settings backup | `settings.json.invalid` beside the settings file | Daemon |
+| Version 1 settings backup | `settings.json.v1-backup` beside the settings file, numbered `.1` to `.15` if taken | Daemon |
 | Temporary settings write | `settings.json.tmp` beside the settings file | Daemon |
 | AppImage daemon log | `~/.cache/aurora/appimage-daemon.log` | AppImage launcher |
 | Manual user unit | `~/.config/systemd/user/aurora.service` | Installer or user |
@@ -20,6 +21,30 @@ shutdown. It treats a live socket as another running daemon.
 The daemon alone reads and writes settings. It writes a sibling
 temporary file, then renames it over the settings file. The GUI and CLI
 use the socket.
+
+Settings that cannot be parsed are copied to `settings.json.invalid` and
+then treated as read-only for the rest of the session. Shutdown cannot
+overwrite a file the daemon failed to understand, so a settings file
+damaged by an unrelated tool survives long enough to be repaired.
+
+A failed settings write is reported, not swallowed. The pending change
+stays pending and the reason reaches clients as `settings_error` and
+`aurora status`.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `XDG_RUNTIME_DIR` | Directory for the control socket. Falls back to `/tmp`. |
+| `XDG_CONFIG_HOME` | Directory for settings. Falls back to `~/.config`. |
+| `LEGION_KEYBOARD_CONFIG` | A legacy settings path to migrate from once. |
+| `AURORA_TRACE` | Set to any value to log ACPI events with their match verdict, every feature report with its payload and result, and the slot counter at acquisition. Off by default. |
+
+`AURORA_TRACE` is for diagnosing a specific failure, not for normal
+running. Successful writes are limited to one line per second, each
+carrying the number of writes since the last line, because a software
+effect writes 30 to 60 frames per second and would otherwise fill a
+journal. Failures are never suppressed.
 
 ## Packaged paths
 
@@ -34,6 +59,21 @@ Nix store paths vary. The package contains:
 | Icon | `share/icons/hicolor/scalable/apps/io.github.HughScott2002.Aurora.svg` |
 
 The NixOS module embeds `udev/99-aurora.rules` from the source tree.
+
+## Version 1 settings migration
+
+Aurora before 0.24 stored one lighting configuration per profile and
+kept per-slot lighting in a separate field. On first run against such a
+file, the daemon converts it: the old per-slot lighting becomes the live
+profile's slots, and each saved profile becomes a profile whose three
+slots match, so activating it looks the way it did before. The active
+slot is recovered by matching the live lighting against the slots.
+
+The original file is copied to `settings.json.v1-backup` first. If no
+backup can be secured, the conversion writes nothing at all.
+
+Profile files written by earlier versions still load through
+`aurora load-profile`. A flat file is lifted into all three slots.
 
 ## Legacy settings migration
 
@@ -55,6 +95,9 @@ writes back to a legacy path.
 | Core command queue | 64 commands |
 | Subscriber outbound queue | 64 lines |
 | Custom effect steps | 4096 |
+| Saved profiles | 128 |
+| Saved custom effects | 128 |
+| Profile name length | 64 bytes |
 | Settings save delay | 2 seconds after the last change |
 
 See the [IPC protocol](../protocol.md) for framing and error behavior.

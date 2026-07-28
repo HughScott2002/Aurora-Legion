@@ -1,6 +1,6 @@
 //! The Custom Effects page: saved custom effects, play/stop, load from file.
 
-use aurora_protocol::custom_effect::CustomEffect;
+use aurora_protocol::ipc::CustomEffectSummary;
 use relm4::{
     adw::{self, prelude::*},
     gtk,
@@ -83,7 +83,7 @@ pub fn build(sender: &ComponentSender<App>) -> CustomEffectsPage {
 }
 
 impl CustomEffectsPage {
-    pub fn sync(&mut self, effects: &[CustomEffect], playing: Option<&str>, sender: &ComponentSender<App>) {
+    pub fn sync(&mut self, effects: &[CustomEffectSummary], playing: Option<&str>, sender: &ComponentSender<App>) {
         match playing {
             Some(name) => {
                 self.stop_row.set_title(&format!("Playing “{name}”"));
@@ -96,9 +96,7 @@ impl CustomEffectsPage {
 
         let mut names: Vec<String> = Vec::with_capacity(effects.len());
         for effect in effects {
-            if let Some(name) = &effect.name {
-                names.push(name.clone());
-            }
+            names.push(effect.name.clone());
         }
 
         if names == self.shown_names {

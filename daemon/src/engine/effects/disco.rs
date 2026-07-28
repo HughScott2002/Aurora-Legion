@@ -1,11 +1,11 @@
 use std::{sync::atomic::Ordering, thread, time::Duration};
 
-use aurora_protocol::profile::Profile;
+use aurora_protocol::profile::Lighting;
 use rand::Rng;
 
 use crate::engine::Inner;
 
-pub fn play(manager: &mut Inner, p: &Profile, rng: &mut rand::rngs::ThreadRng) {
+pub fn play(manager: &mut Inner, p: &Lighting, rng: &mut rand::rngs::ThreadRng) {
     while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
         let colors = [[255, 0, 0], [255, 255, 0], [0, 255, 0], [0, 255, 255], [0, 0, 255], [255, 0, 255]];
         let colors_index = rng.random_range(0..6);
