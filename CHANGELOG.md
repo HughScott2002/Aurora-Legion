@@ -28,6 +28,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An interface style guide (`docs/ui-style-guide.md`) covering hierarchy,
   the spacing scale, and what earns a place on screen, with the sources
   it draws on.
+- A Project group on the Settings page linking to issue reporting,
+  discussions, and the repository, with the version, license and author
+  in a footer below it. Aurora is tested on one laptop, so the report
+  link is how a failure on any other model reaches someone who can fix
+  it, and that belongs on a page rather than inside a menu.
 
 ### Changed
 
@@ -56,6 +61,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   than greying them out. Static shows no Speed or Direction, effects that
   ignore zone colours show no colour pickers, and the swipe wipe switch
   appears only in fill mode.
+- The Daemon page is now Settings, and the app no longer says "daemon" to
+  users who never asked for one. The group is Background Service, the
+  disconnected page offers to start Aurora rather than a daemon, and a
+  version mismatch is called that instead of an incompatible daemon.
 
 ### Fixed
 

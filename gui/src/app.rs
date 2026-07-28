@@ -23,7 +23,8 @@ use strum::IntoEnumIterator;
 use crate::{
     daemon_actions,
     ipc::{self, IpcHandle, IpcUpdate},
-    pages::{custom_effects, daemon_page, lighting, profiles},
+    links,
+    pages::{custom_effects, lighting, profiles, settings},
 };
 
 const WINDOW_DEFAULT_WIDTH: i32 = 640;
@@ -114,7 +115,7 @@ pub struct AppWidgets {
     lighting: lighting::LightingPage,
     profiles: profiles::ProfilesPage,
     custom: custom_effects::CustomEffectsPage,
-    daemon: daemon_page::DaemonPage,
+    settings: settings::SettingsPage,
 }
 
 impl SimpleComponent for App {
@@ -167,7 +168,7 @@ impl SimpleComponent for App {
         let lighting = lighting::build(&sender);
         let profiles = profiles::build(&sender);
         let custom = custom_effects::build(&sender);
-        let daemon = daemon_page::build(&sender);
+        let settings = settings::build(&sender);
 
         let view_stack = adw::ViewStack::new();
         let lighting_page = view_stack.add_titled(&lighting.root, Some("lighting"), "Lighting");
@@ -176,19 +177,19 @@ impl SimpleComponent for App {
         profiles_page.set_icon_name(Some("view-list-bullet-symbolic"));
         let custom_page = view_stack.add_titled(&custom.root, Some("custom"), "Custom");
         custom_page.set_icon_name(Some("media-playback-start-symbolic"));
-        let daemon_stack_page = view_stack.add_titled(&daemon.root, Some("daemon"), "Daemon");
-        daemon_stack_page.set_icon_name(Some("system-run-symbolic"));
+        let settings_stack_page = view_stack.add_titled(&settings.root, Some("settings"), "Settings");
+        settings_stack_page.set_icon_name(Some("preferences-system-symbolic"));
 
         // --- Disconnected status page ------------------------------------
         let status_page = adw::StatusPage::new();
         status_page.set_icon_name(Some("keyboard-brightness-symbolic"));
-        status_page.set_title("Daemon Not Running");
+        status_page.set_title("Aurora Is Not Running");
         status_page.set_description(Some(
             "The background service that drives the keyboard lighting is not running. \
              Start it here, or from a terminal with \u{201c}aurora daemon\u{201d}.",
         ));
 
-        let start_button = gtk::Button::with_label("Start Daemon");
+        let start_button = gtk::Button::with_label("Start Aurora");
         start_button.add_css_class("suggested-action");
         start_button.add_css_class("pill");
         start_button.set_halign(gtk::Align::Center);
@@ -268,7 +269,7 @@ impl SimpleComponent for App {
             lighting,
             profiles,
             custom,
-            daemon,
+            settings,
         };
 
         ComponentParts { model, widgets }
@@ -515,7 +516,7 @@ impl SimpleComponent for App {
         // A protocol mismatch replaces the status page text: retrying is
         // pointless, so the page must stop offering to start a daemon.
         if let Some(message) = &self.incompatible {
-            widgets.status_page.set_title("Incompatible Daemon");
+            widgets.status_page.set_title("Version Mismatch");
             widgets.status_page.set_description(Some(message));
             if widgets.start_button.get_visible() {
                 widgets.start_button.set_visible(false);
@@ -529,7 +530,7 @@ impl SimpleComponent for App {
         }
 
         // --- Start button while a start attempt runs ----------------------
-        let start_label = if self.daemon_start_pending { "Starting…" } else { "Start Daemon" };
+        let start_label = if self.daemon_start_pending { "Starting…" } else { "Start Aurora" };
         if widgets.start_button.label().as_deref() != Some(start_label) {
             widgets.start_button.set_label(start_label);
         }
@@ -592,12 +593,12 @@ impl SimpleComponent for App {
 
         // --- Daemon page ----------------------------------------------------
         let status_text = format!("Running (v{})", state.version);
-        if widgets.daemon.status_row.subtitle().as_deref() != Some(status_text.as_str()) {
-            widgets.daemon.status_row.set_subtitle(&status_text);
+        if widgets.settings.status_row.subtitle().as_deref() != Some(status_text.as_str()) {
+            widgets.settings.status_row.set_subtitle(&status_text);
         }
 
-        if widgets.daemon.autostart_row.is_active() != self.autostart_enabled {
-            widgets.daemon.autostart_row.set_active(self.autostart_enabled);
+        if widgets.settings.autostart_row.is_active() != self.autostart_enabled {
+            widgets.settings.autostart_row.set_active(self.autostart_enabled);
         }
         let autostart_subtitle = if !self.autostart_available {
             "No systemd unit installed"
@@ -606,12 +607,12 @@ impl SimpleComponent for App {
         } else {
             "Enable the systemd user service"
         };
-        if widgets.daemon.autostart_row.subtitle().as_deref() != Some(autostart_subtitle) {
-            widgets.daemon.autostart_row.set_subtitle(autostart_subtitle);
+        if widgets.settings.autostart_row.subtitle().as_deref() != Some(autostart_subtitle) {
+            widgets.settings.autostart_row.set_subtitle(autostart_subtitle);
         }
         let switch_sensitive = self.autostart_available && !self.autostart_managed;
-        if widgets.daemon.autostart_row.is_sensitive() != switch_sensitive {
-            widgets.daemon.autostart_row.set_sensitive(switch_sensitive);
+        if widgets.settings.autostart_row.is_sensitive() != switch_sensitive {
+            widgets.settings.autostart_row.set_sensitive(switch_sensitive);
         }
     }
 }
@@ -1022,8 +1023,8 @@ fn show_about_dialog() {
     dialog.set_version(env!("CARGO_PKG_VERSION"));
     dialog.set_developer_name("Hugh Scott");
     dialog.set_license_type(gtk::License::Gpl30);
-    dialog.set_website("https://github.com/HughScott2002/Aurora-Legion");
-    dialog.set_issue_url("https://github.com/HughScott2002/Aurora-Legion/issues");
+    dialog.set_website(links::REPOSITORY_URL);
+    dialog.set_issue_url(links::NEW_ISSUE_URL);
     dialog.present(Some(&window));
 }
 
