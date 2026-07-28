@@ -52,29 +52,69 @@ one process. Close that process and animated effects stop.
 
 Aurora keeps profiles and effects in a persistent daemon.
 
-| Capability | L5P-Keyboard-RGB | Aurora |
+| Capability | L5P-Keyboard-RGB 0.20.8 | Aurora |
 | --- | --- | --- |
 | Lighting lifetime | Animated effects need the app | Effects continue after the GUI closes |
+| Fn+Space | Not detected; the key shows firmware lighting instead of yours | Detected; each slot keeps its own lighting |
+| Slots per profile | One lighting configuration | Three, one per Fn+Space slot |
+| Choosing a slot | The keyboard's own cycle only | Keyboard, app, or `aurora slot 2` |
 | Startup | Manual | Profile restored by a user service |
 | Interface | egui | Native GTK4 and libadwaita |
 | CLI | Separate state | Shared daemon state |
-| Settings | Working-directory JSON | XDG config with atomic writes |
+| Other clients | None | Versioned JSON protocol on a unix socket |
+| Unsupported machine | Fails quietly | Each optional feature reports its own state and reason |
+| Settings | Working-directory JSON | XDG config, atomic writes, never erased on a read failure |
 | Keyboard unplug | Can panic an effect thread | Reports failure and reacquires |
+
+## Fn+Space keeps your lighting
+
+The keyboard has three lighting slots of its own plus off, and Fn+Space
+cycles them. The embedded controller owns them, applies its own stored
+lighting on each press, and offers no command to set or select a slot.
+
+Software that only writes to the keyboard never sees any of this. Press
+the key and the firmware's lighting replaces yours; edit a colour and it
+lands in whichever slot happens to be active. In practice you get one
+usable slot out of three.
+
+Aurora listens for the event the controller raises, and keeps a lighting
+per slot:
+
+```console
+$ aurora slot 2
+slot 2 selected
+```
+
+A profile holds all three. Save one profile and you have saved three
+looks, reachable from the keyboard without opening anything.
+
+The evidence behind this, including the approaches that do not work and
+why polling the slot counter is one of them, is in
+[Fn+Space synchronization](docs/explanation/fn-space-sync.md) and the
+[hardware research](docs/research/ite8295-hardware-profiles.md).
 
 ## Measured
 
-The same machine and Nix release pipeline measured both projects. The
-resident comparison uses L5P-Keyboard-RGB's GUI and Aurora's daemon.
-See the [method and raw data](docs/measurements.md).
+Both projects were built and measured on the same machine on the same
+day, through the same Nix pipeline. The resident comparison uses
+L5P-Keyboard-RGB's GUI and Aurora's daemon, because those are the
+processes that have to stay alive for the lights to stay on. See the
+[method and raw data](docs/measurements.md).
 
 | Metric | L5P-Keyboard-RGB 0.20.8 | Aurora | Verdict |
 | --- | --- | --- | --- |
-| Resident memory, Static | 82.6 MiB | 10.2 MiB | ✅ 8× smaller |
-| Resident memory, Swipe | 82.3 MiB | 10.8 MiB | ✅ 8× smaller |
-| Resident CPU, idle | 0.10% | 0.04% | ✅ 2.5× lower |
-| Resident CPU, Swipe | 0.52% | 0.55% to 0.97% | ⚠️ comparable, more variance |
-| Binaries on disk | 26.6 MB | 8.4 MB daemon and 2.5 MB GUI | ✅ 2.4× smaller combined |
-| GUI while open | 82.6 MiB resident | 61 MiB until closed | ✅ lighter and transient |
+| Resident memory, Static | 92.5 MiB | 11.5 MiB | ✅ 8× smaller |
+| Resident memory, Swipe | 92.2 MiB | 11.5 MiB | ✅ 8× smaller |
+| Resident CPU, idle | 0.13% | 0.05% | ✅ 2.6× lower |
+| Resident CPU, Swipe | 0.52% | 0.50% | ➖ the same, it is the same code |
+| Binaries on disk | 26.6 MB | 8.7 MB daemon and 2.7 MB GUI | ✅ 2.3× smaller combined |
+| GUI while open | 92.5 MiB, always | 85.2 MiB, until you close it | ✅ lighter and transient |
+
+Measured 2026-07-27. The 0.21.0 round is not comparable and was
+replaced: both projects gained about 10 MiB of PSS on this machine
+between the two dates without either changing its own toolkit, because
+the system's GTK and libadwaita moved underneath them. Refreshing only
+Aurora's column would have claimed a ratio it did not earn.
 
 ## How it works
 
