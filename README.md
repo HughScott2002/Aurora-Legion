@@ -20,7 +20,7 @@
 </div>
 
 <div align="center">
-  <img src="docs/screenshot.png" alt="Aurora GTK4 interface" width="560"/>
+  <img src="docs/aurora-lenovo-legion-rgb-keyboard-linux-app.png" alt="Aurora on Linux showing 4-zone RGB keyboard lighting for a Lenovo Legion laptop, with the static effect and red, green, blue and magenta zones" width="400"/>
 </div>
 
 Aurora controls 4-zone RGB keyboards in select Lenovo Legion, IdeaPad
