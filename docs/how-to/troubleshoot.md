@@ -58,15 +58,39 @@ $ lsusb -d 048d:
 
 Aurora supports the product IDs listed in
 [`driver/src/lib.rs`](../../driver/src/lib.rs). If the ID is supported,
-inspect hidraw access:
+inspect access to the raw USB node, which is what Aurora opens:
 
 ```console
-$ getfacl /dev/hidraw*
+$ udevadm info -q path -n /dev/bus/usb/BBB/DDD
+$ getfacl -p /dev/bus/usb/BBB/DDD
 ```
 
-The logged-in user needs read and write access. Reinstall the
-[udev rule](install-linux.md#grant-keyboard-access), then replug the
-keyboard or reboot.
+Find `BBB/DDD` from the bus and device numbers `lsusb` printed. The
+logged-in user needs an ACL entry granting read and write. Aurora talks
+to the controller through libusb, so `/dev/hidraw*` permissions are not
+what matters here even though the device is an HID one.
+
+Reinstall the [udev rule](install-linux.md#grant-keyboard-access), then
+replug the keyboard or reboot.
+
+### Access worked, then stopped after an upgrade
+
+`TAG+="uaccess"` is a dynamic ACL that systemd-logind applies when a
+session activates. Restarting udevd drops it, which a distribution
+upgrade or `nixos-rebuild switch` will do, and it is not restored until
+the session activates again. Log out and back in.
+
+If a machine needs access that survives a udevd restart without a
+re-login, add a static rule beside the shipped one, replacing the
+product ID with yours:
+
+```
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c985", MODE="0660", GROUP="users"
+```
+
+This is a real loosening: every member of that group can then reach the
+controller, rather than whoever is physically logged in. Prefer the
+re-login unless you have a reason not to.
 
 ## Another process owns the keyboard
 

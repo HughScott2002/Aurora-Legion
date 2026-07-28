@@ -6,6 +6,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The shipped udev rules granted access to `/dev/hidraw*`, but the
+  driver builds hidapi with the libusb backend and opens the raw USB
+  node instead, so the documented install granted nothing and every
+  install path ended in permission denied on a machine with no other
+  rules. The rules now match the USB device node. Affects every release
+  up to and including 0.24.0 (#20).
+
 ## [0.24.0] - 2026-07-27
 
 ### Added
