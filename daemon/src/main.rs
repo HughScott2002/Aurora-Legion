@@ -6,6 +6,7 @@ mod hotkey;
 mod keyboard;
 mod server;
 mod settings;
+mod slot_watch;
 
 use std::sync::{atomic::AtomicBool, Arc};
 
@@ -85,6 +86,7 @@ fn run_daemon() {
 
     spawn_signal_listener(command_tx.clone());
     hotkey::spawn(command_tx.clone());
+    slot_watch::spawn(command_tx.clone());
 
     // Accept loop on its own thread; it lives for the whole process, so the
     // handle is deliberately not joined.
@@ -95,7 +97,7 @@ fn run_daemon() {
 
     // The core loop runs on the main thread until a signal or a Shutdown
     // request arrives.
-    core::run(&command_rx, &shutdown_flag);
+    core::run(&command_tx, &command_rx, &shutdown_flag);
 
     let remove_result = std::fs::remove_file(&path);
     if let Err(error) = remove_result {

@@ -11,8 +11,11 @@ use crossbeam_channel::{Receiver, Sender};
 use aurora_protocol::{
     custom_effect::{CustomEffect, EffectType},
     effects::{Direction, Effects},
-    profile::{self, Profile, COLOR_BYTE_COUNT},
+    ipc::{Subsystem, SubsystemState},
+    profile::{self, Lighting, COLOR_BYTE_COUNT},
 };
+
+use crate::core::Command;
 use legion_rgb_driver::{BaseEffects, Keyboard, SPEED_RANGE};
 use rand::{rng, rngs::ThreadRng};
 use std::{
@@ -38,7 +41,7 @@ pub const SOFTWARE_SPEED_RANGE: std::ops::RangeInclusive<u8> = 1..=10;
 
 #[derive(Debug)]
 enum Message {
-    Profile { profile: Profile },
+    Lighting { lighting: Lighting },
     CustomEffect { effect: CustomEffect },
     Exit,
 }
@@ -57,12 +60,15 @@ struct Inner {
     rx: Receiver<Message>,
     stop_signals: StopSignals,
     device_error: Arc<AtomicBool>,
+    /// Where effects report subsystem state. `None` for the CLI's direct
+    /// apply path, which has no core to report to.
+    command_tx: Option<Sender<Command>>,
 }
 
 impl EffectManager {
     /// Takes an already-acquired keyboard. Acquisition (with retry and error
     /// classification) lives in `crate::keyboard`, not here.
-    pub fn new(keyboard: Keyboard, stop_signals: StopSignals) -> Self {
+    pub fn new(keyboard: Keyboard, stop_signals: StopSignals, command_tx: Option<Sender<Command>>) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<Message>(MESSAGE_QUEUE_CAPACITY);
         let device_error = Arc::new(AtomicBool::new(false));
 
@@ -71,6 +77,7 @@ impl EffectManager {
             rx,
             stop_signals: stop_signals.clone(),
             device_error: device_error.clone(),
+            command_tx,
         };
 
         let inner_handle = thread::spawn(move || loop {
@@ -98,8 +105,8 @@ impl EffectManager {
             }
 
             match newest {
-                Message::Profile { profile } => {
-                    inner.set_profile(profile);
+                Message::Lighting { lighting } => {
+                    inner.set_lighting(lighting);
                 }
                 Message::CustomEffect { effect } => {
                     inner.play_custom_effect(&effect);
@@ -122,14 +129,14 @@ impl EffectManager {
         self.device_error.load(Ordering::SeqCst)
     }
 
-    pub fn set_profile(&self, profile: Profile) {
+    pub fn set_lighting(&self, lighting: Lighting) {
         self.stop_signals.store_true();
         // Blocking send is safe: the queue only fills while the previous
         // effect is still winding down, which the stop signal bounds to a
         // few tens of milliseconds.
-        let send_result = self.tx.send(Message::Profile { profile });
+        let send_result = self.tx.send(Message::Lighting { lighting });
         if send_result.is_err() {
-            eprintln!("engine: dropped profile update, engine thread is gone");
+            eprintln!("engine: dropped lighting update, engine thread is gone");
         }
     }
 
@@ -164,41 +171,70 @@ impl Drop for EffectManager {
 }
 
 impl Inner {
-    fn set_profile(&mut self, mut profile: Profile) {
+    fn set_lighting(&mut self, mut lighting: Lighting) {
         self.stop_signals.store_false();
         let mut rng = rng();
 
-        if profile.effect.is_built_in() {
-            let clamped_speed = clamp_hardware_speed(profile.speed);
-            if !self.write_speed(clamped_speed) {
+        let hardware_effect = match lighting.effect {
+            Effects::Static => Some(BaseEffects::Static),
+            Effects::Breath => Some(BaseEffects::Breath),
+            Effects::Smooth => Some(BaseEffects::Smooth),
+            Effects::Wave => match lighting.direction {
+                Direction::Left => Some(BaseEffects::LeftWave),
+                Direction::Right => Some(BaseEffects::RightWave),
+            },
+            _ => None,
+        };
+
+        if let Some(hardware_effect) = hardware_effect {
+            let clamped_speed = clamp_hardware_speed(lighting.speed);
+            let brightness_payload = lighting.brightness as u8 + 1;
+            let colors = lighting.rgb_array();
+            if !self.write_hardware_profile(hardware_effect, clamped_speed, brightness_payload, colors) {
                 return;
             }
-        } else {
-            // All software effects rely on rapidly switching a static color.
-            if !self.write_effect(BaseEffects::Static) {
-                return;
-            }
+            self.stop_signals.store_false();
+            return;
         }
 
-        let brightness_payload = profile.brightness as u8 + 1;
+        // All software effects rely on rapidly switching a static color.
+        if !self.write_effect(BaseEffects::Static) {
+            return;
+        }
+
+        let brightness_payload = lighting.brightness as u8 + 1;
         if !self.write_brightness(brightness_payload) {
             return;
         }
 
-        self.apply_effect(&mut profile, &mut rng);
+        self.apply_effect(&mut lighting, &mut rng);
         self.stop_signals.store_false();
     }
 
-    fn apply_effect(&mut self, profile: &mut Profile, rng: &mut ThreadRng) {
-        match profile.effect {
+    /// Report an optional subsystem's state to the core. Effects use this
+    /// so a capture failure becomes visible state rather than a log line
+    /// nobody reads.
+    fn report_subsystem(&self, subsystem: Subsystem, state: SubsystemState) {
+        let Some(command_tx) = &self.command_tx else {
+            return;
+        };
+
+        let send_result = command_tx.send(Command::SubsystemStatus { subsystem, state });
+        if send_result.is_err() {
+            // Core is gone; the daemon is shutting down.
+        }
+    }
+
+    fn apply_effect(&mut self, lighting: &mut Lighting, rng: &mut ThreadRng) {
+        match lighting.effect {
             Effects::Static => {
-                if !self.write_colors(&profile.rgb_array()) {
+                if !self.write_colors(&lighting.rgb_array()) {
                     return;
                 }
                 self.write_effect(BaseEffects::Static);
             }
             Effects::Breath => {
-                if !self.write_colors(&profile.rgb_array()) {
+                if !self.write_colors(&lighting.rgb_array()) {
                     return;
                 }
                 self.write_effect(BaseEffects::Breath);
@@ -207,28 +243,30 @@ impl Inner {
                 self.write_effect(BaseEffects::Smooth);
             }
             Effects::Wave => {
-                let effect = match profile.direction {
+                let effect = match lighting.direction {
                     Direction::Left => BaseEffects::LeftWave,
                     Direction::Right => BaseEffects::RightWave,
                 };
                 self.write_effect(effect);
             }
-            Effects::Lightning => effects::lightning::play(self, profile, rng),
+            Effects::Lightning => effects::lightning::play(self, lighting, rng),
             Effects::AmbientLight { mut fps, mut saturation_boost } => {
                 fps = fps.clamp(1, 60);
                 saturation_boost = saturation_boost.clamp(0.0, 1.0);
                 effects::ambient::play(self, fps, saturation_boost);
+                // play() returns when the effect is replaced or stopped.
+                self.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Inactive);
             }
             Effects::SmoothWave { mode, clean_with_black } => {
-                profile.rgb_zones = profile::arr_to_zones([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 255]);
-                effects::swipe::play(self, profile, mode, clean_with_black);
+                lighting.rgb_zones = profile::arr_to_zones([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 255]);
+                effects::swipe::play(self, lighting, mode, clean_with_black);
             }
-            Effects::Swipe { mode, clean_with_black } => effects::swipe::play(self, profile, mode, clean_with_black),
-            Effects::Disco => effects::disco::play(self, profile, rng),
+            Effects::Swipe { mode, clean_with_black } => effects::swipe::play(self, lighting, mode, clean_with_black),
+            Effects::Disco => effects::disco::play(self, lighting, rng),
             Effects::Christmas => effects::christmas::play(self, rng),
-            Effects::Fade => effects::fade::play(self, profile),
+            Effects::Fade => effects::fade::play(self, lighting),
             Effects::Temperature => effects::temperature::play(self),
-            Effects::Ripple => effects::ripple::play(self, profile),
+            Effects::Ripple => effects::ripple::play(self, lighting),
         }
     }
 
@@ -283,12 +321,18 @@ impl Inner {
         }
     }
 
-    fn write_speed(&mut self, speed: u8) -> bool {
+    fn write_hardware_profile(
+        &mut self,
+        effect: BaseEffects,
+        speed: u8,
+        brightness: u8,
+        colors: [u8; COLOR_BYTE_COUNT],
+    ) -> bool {
         debug_assert!(SPEED_RANGE.contains(&speed));
-        match self.keyboard.set_speed(speed) {
+        match self.keyboard.apply_hardware_profile(effect, speed, brightness, colors) {
             Ok(()) => true,
             Err(error) => {
-                self.record_device_error("set_speed", &error);
+                self.record_device_error("apply_hardware_profile", &error);
                 false
             }
         }

@@ -2,7 +2,7 @@
 //! to talk to a running daemon synchronously).
 
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::net::UnixStream,
     time::Duration,
 };
@@ -106,7 +106,12 @@ impl Client {
         let mut line = String::new();
         loop {
             line.clear();
-            let bytes_read = self.reader.read_line(&mut line).map_err(ClientError::Io)?;
+            // Bounded before allocation, not after: an unbounded read from
+            // a wedged daemon is the CLI's version of the same bug.
+            let bytes_read = (&mut self.reader)
+                .take(MAX_LINE_BYTES as u64 + 1)
+                .read_line(&mut line)
+                .map_err(ClientError::Io)?;
             if bytes_read == 0 {
                 return Err(ClientError::Protocol("daemon closed the connection".to_string()));
             }

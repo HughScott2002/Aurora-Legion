@@ -1,25 +1,27 @@
 # Contributing
 
-Thanks for looking at Aurora. Discussions, issues and PRs are all
-welcome; new frontends especially. The [`protocol`](protocol/) crate is
-the seam (JSON lines over a unix socket), so a TUI, KDE or web client
-needs zero daemon changes.
+Issues and pull requests are welcome. New frontends use the
+[`protocol`](protocol/) crate and its
+[documented interface](docs/protocol.md), so they need no daemon
+changes.
 
 ## Before you write code
 
-Read [docs/style-guide.md](docs/style-guide.md). The short version: no
-clever one-liners, bounded everything, no unwraps on daemon paths, stock
-libadwaita in the GUI.
+Read the [style guide](docs/style-guide.md). The short version: no
+clever one-liners, bound everything, no `unwrap` or `expect` on daemon
+paths, and use stock libadwaita in the GUI.
 
 ## Workflow
 
-- Clone-to-running-build steps, devshell flags and the udev rule are in
-  [docs/quick-start.md](docs/quick-start.md).
+- Follow [Build from source](docs/how-to/build-from-source.md) for the
+  development shell, native dependencies and checks.
 - Enable the local build gate once per clone:
   `git config core.hooksPath hooks`. It runs `nix build` before every
   push; there is no CI, the gate is the check.
 - Verify changes against the real daemon, not just the compiler: run it,
   drive it with `aurora status` / `aurora set` or the GUI.
+- Put user documentation in the right
+  [Diátaxis section](docs/README.md) and keep one purpose per page.
 
 ## Commits and PRs
 

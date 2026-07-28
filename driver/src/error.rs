@@ -25,4 +25,6 @@ pub enum RangeErrorKind {
     Zone,
     Speed,
     Brightness,
+    /// The EC's hardware slot counter held a value outside 1..=4.
+    Slot,
 }

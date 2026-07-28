@@ -1,6 +1,7 @@
 mod app;
 mod daemon_actions;
 mod ipc;
+mod links;
 mod pages;
 mod preview;
 

@@ -1,12 +1,16 @@
 # Aurora IPC protocol
 
-The contract between the Aurora daemon and any client (the GTK GUI, the
-CLI, or a third-party frontend). This document is complete on purpose:
-a client can be written from it alone, in any language, without reading
-the Rust types. The types live in [`protocol/src/ipc.rs`](../protocol/src/ipc.rs);
-if this document and the code disagree, that is a bug in this document.
+This reference defines the interface between the daemon and every
+client. It is enough to implement a client without reading Rust. The
+types live in [`protocol/src/ipc.rs`](../protocol/src/ipc.rs). If code
+and this page disagree, this page is wrong.
 
-Protocol version: **1** (`PROTOCOL_VERSION` in the protocol crate).
+Protocol version: **2** (`PROTOCOL_VERSION` in the protocol crate).
+
+Version 2 moved the lighting configuration out of `Profile` and into
+`Profile.slots`, one entry per Fn+Space slot. A version 1 client would
+misread every profile it received, so this is a breaking change and both
+reference clients stop on a mismatch.
 
 ## Transport
 
@@ -76,13 +80,15 @@ Two version numbers exist:
 Handshake: send `Hello` first on every new connection.
 
 ```json
-{"id": 1, "req": {"type": "Hello", "protocol_version": 1}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 1, "daemon_version": "0.21.0"}}
+{"id": 1, "req": {"type": "Hello", "protocol_version": 2}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 2, "daemon_version": "0.24.0"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
   mismatch (it logs a warning); whether to proceed is the client's
   decision. The reference clients refuse to continue on mismatch.
+- A version 1 `Hello` still parses, so the daemon can answer with a
+  version mismatch rather than an unhelpful parse error.
 - A daemon older than protocol 1 does not know `Hello` and answers
   `{"id": 0, "resp": {"type": "Error", "kind": "InvalidRequest", ...}}`.
   Clients should report that as "daemon predates the handshake", not as
@@ -98,25 +104,36 @@ Requests are objects tagged by `"type"`; parameters are sibling fields.
 | --- | --- | --- | --- |
 | `Hello` | `protocol_version` | `Hello` | Version handshake; see above. |
 | `GetState` | none | `State` | Full daemon state snapshot. |
-| `SetProfile` | `profile` | `Ok` | Make `profile` the live profile and apply it. Stops a playing custom effect. The profile does not need a name. |
+| `SetProfile` | `profile` | `Ok` | Make `profile` the live profile, all slots at once, and apply the active slot. Stops a playing custom effect. The profile does not need a name. |
+| `SetLighting` | `slot`, `lighting` | `Ok` | Replace one slot's lighting in the live profile and apply it if that slot is active. `slot` of `null` targets whichever slot is active. |
+| `SelectSlot` | `slot` | `Ok` | Make `slot` the live position and apply it. |
 | `PlayCustomEffect` | `effect` | `Ok` | Play a custom effect until stopped or replaced. |
-| `StopCustomEffect` | none | `Ok` | Stop the playing custom effect and re-apply the live profile. |
-| `ListProfiles` | none | `Profiles` | All saved profiles. |
-| `AddProfile` | `profile` | `Ok` | Save a named profile; overwrites a saved profile with the same name. Name required and non-empty. |
+| `PlayCustomEffectByName` | `name` | `Ok` | Play a saved custom effect without sending its body back. |
+| `StopCustomEffect` | none | `Ok` | Stop the playing custom effect and re-apply the active slot. |
+| `AddProfile` | `profile` | `Ok` | Save a named profile; overwrites a saved profile with the same name. Name required, non-empty, and at most 64 bytes. |
 | `DeleteProfile` | `name` | `Ok` | Delete the saved profile called `name`. |
 | `SwitchProfile` | `name` | `Ok` | Make the saved profile called `name` the live profile. |
 | `CycleProfile` | none | `Ok` | Advance to the next saved profile, wrapping around. |
-| `ListCustomEffects` | none | `CustomEffects` | All saved custom effects. |
 | `AddCustomEffect` | `effect` | `Ok` | Save a named custom effect; overwrites one with the same name. Name required and non-empty. |
 | `DeleteCustomEffect` | `name` | `Ok` | Delete the saved custom effect called `name`. |
 | `Subscribe` | none | `Ok` | Push a `StateChanged` event on this connection whenever daemon state changes. |
 | `Shutdown` | none | `Ok` | Ask the daemon to exit cleanly. The `Ok` is queued before exit, but clients should tolerate the connection closing without it. |
 
+There is no request that lists profiles or custom effects. Every state
+snapshot already carries their names, so a separate listing round trip
+would only offer a second, staler answer.
+
+`SelectSlot` moves Aurora's own slot number, the same one Fn+Space
+moves. It cannot drive the controller's counter, because this hardware
+exposes no such command. See
+[Fn+Space synchronization](explanation/fn-space-sync.md).
+
 Examples:
 
 ```json
 {"id": 2, "req": {"type": "SwitchProfile", "name": "gaming"}}
-{"id": 3, "req": {"type": "SetProfile", "profile": {"name": null, "rgb_zones": [{"rgb": [255, 0, 0], "enabled": true}, {"rgb": [0, 255, 0], "enabled": true}, {"rgb": [0, 0, 255], "enabled": true}, {"rgb": [255, 255, 255], "enabled": true}], "effect": "Static", "direction": "Left", "speed": 1, "brightness": "Low"}}
+{"id": 3, "req": {"type": "SelectSlot", "slot": "Second"}}
+{"id": 4, "req": {"type": "SetLighting", "slot": null, "lighting": {"rgb_zones": [{"rgb": [255, 0, 0], "enabled": true}, {"rgb": [0, 255, 0], "enabled": true}, {"rgb": [0, 0, 255], "enabled": true}, {"rgb": [255, 255, 255], "enabled": true}], "effect": "Static", "direction": "Left", "speed": 1, "brightness": "Low"}}}
 ```
 
 ## Responses
@@ -128,8 +145,6 @@ Responses are objects tagged by `"type"`.
 | `Hello` | `protocol_version`, `daemon_version` | Handshake answer. |
 | `Ok` | none | Request done. |
 | `State` | `state` | A `DaemonState` object. |
-| `Profiles` | `profiles` | Array of `Profile`. |
-| `CustomEffects` | `effects` | Array of `CustomEffect`. |
 | `Error` | `kind`, `message` | Request failed; see error kinds. |
 
 ## Events
@@ -156,7 +171,8 @@ Subscription semantics:
 | --- | --- |
 | `KeyboardNotFound` | No supported keyboard is connected. |
 | `PermissionDenied` | A keyboard exists but the daemon may not open it (udev rule missing). |
-| `NoSuchProfile` | No saved profile or custom effect with that name. |
+| `NoSuchProfile` | No saved profile with that name. |
+| `NoSuchCustomEffect` | No saved custom effect with that name. |
 | `InvalidRequest` | Unparseable line, unknown request type, or a parameter out of range; `message` says which. |
 | `Internal` | Anything else; `message` has details. |
 
@@ -168,17 +184,71 @@ Subscription semantics:
 {
   "keyboard": {"type": "Connected"},
   "current": { Profile },
+  "active_slot": "First",
   "custom_effect_playing": "pulse",
-  "profiles": [ Profile, ... ],
-  "custom_effects": [ CustomEffect, ... ],
-  "version": "0.21.0"
+  "profiles": [{"name": "gaming"}],
+  "custom_effects": [{"name": "pulse", "step_count": 12, "should_loop": true}],
+  "version": "0.24.0",
+  "settings_error": null,
+  "slot_sync": {"type": "Active"},
+  "hotkey": {"type": "Unavailable", "reason": "no display connection"},
+  "screen_capture": {"type": "Inactive"}
 }
 ```
 
+- `current` is the live profile, all three slots. The keyboard shows
+  `current.slots[active_slot]` unless a custom effect is playing or
+  `active_slot` is `"Off"`.
+- `active_slot` is a `SlotSelection`. See below.
 - `custom_effect_playing` is the playing custom effect's display name,
   or `null` when none plays.
-- `current` is the live profile: what the keyboard shows unless a
-  custom effect is playing.
+- `profiles` and `custom_effects` carry summaries, not bodies. A
+  broadcast holding every profile and every effect body would grow past
+  `MAX_LINE_BYTES` and disconnect every client, on every broadcast. Use
+  `SwitchProfile` and `PlayCustomEffectByName` to act on a summary.
+- `settings_error` is why the last settings write failed, or `null`.
+  Lighting keeps working when persistence does not, so a failure is
+  reported rather than fatal.
+- `slot_sync`, `hotkey` and `screen_capture` are `SubsystemState`
+  values. See below.
+
+At most 128 profiles and 128 custom effects are stored
+(`MAX_SAVED_PROFILES`, `MAX_SAVED_CUSTOM_EFFECTS`).
+
+### SlotSelection
+
+One of `"First"`, `"Second"`, `"Third"`, `"Off"`. The controller cycles
+three lit slots and an off position, so the type is closed: an
+out-of-range slot cannot be represented, let alone sent.
+
+`"Off"` holds no lighting. `SetLighting` targeting it is rejected.
+
+After the daemon acquires the keyboard this is Aurora's own number, not
+a live controller reading. Aurora's own lighting writes move the
+controller's counter without raising the Fn+Space event, so the counter
+is trusted exactly once, at acquisition. See
+[Fn+Space synchronization](explanation/fn-space-sync.md).
+
+### SubsystemState
+
+Parts of Aurora that depend on something a machine may not have report
+their own state instead of failing the daemon. Tagged by `"type"`:
+
+| Type | Fields | Meaning |
+| --- | --- | --- |
+| `Active` | none | Working. |
+| `Degraded` | `reason` | Working, but something was missed and this state may be wrong. |
+| `Unavailable` | `reason` | Not available on this machine or in this session. |
+| `Inactive` | none | Available but not running right now. |
+| `Unknown` | none | Not determined yet; the state at startup. |
+
+`slot_sync` is Fn+Space detection over the ACPI netlink socket. When it
+is not `Active`, slots still work; they have to be selected with
+`SelectSlot` rather than cycled with the key. `screen_capture` is
+`Inactive` except while the Ambient effect plays.
+
+A client that hides a feature when its subsystem is unavailable should
+show the `reason`. It is what a user can act on or report.
 
 ### KeyboardStatus
 
@@ -193,9 +263,33 @@ Tagged by `"type"`:
 
 ### Profile
 
+A profile is the named, saveable thing. It owns one `Lighting` per
+Fn+Space slot, so switching slots on the keyboard moves between three
+looks that belong to the same profile.
+
 ```json
 {
   "name": "gaming",
+  "slots": [ Lighting, Lighting, Lighting ]
+}
+```
+
+- `name`: string or `null`. Required for `AddProfile`, where it must be
+  non-empty and at most 64 bytes (`MAX_NAME_BYTES`).
+- `slots`: exactly 3 entries, in the order Fn+Space walks them. A new
+  profile starts red, green, and blue.
+
+This shape is what version 2 changed. In version 1 a profile *was* one
+lighting configuration, with the fields now inside `Lighting` sitting
+directly on the profile, and per-slot lighting lived in a separate
+settings field.
+
+### Lighting
+
+What one slot shows.
+
+```json
+{
   "rgb_zones": [
     {"rgb": [255, 0, 0], "enabled": true},
     {"rgb": [0, 255, 0], "enabled": true},
@@ -209,13 +303,14 @@ Tagged by `"type"`:
 }
 ```
 
-- `name`: string or `null`. Required (non-empty) only for `AddProfile`.
 - `rgb_zones`: exactly 4 zones, left to right. `rgb` is `[r, g, b]`,
   each 0 to 255. A disabled zone renders black.
 - `direction`: `"Left"` or `"Right"`. Only meaningful for effects that
   take a direction (see the effects table); always present.
-- `speed`: integer 1 to 10. Only meaningful for effects that take a
-  speed; always present.
+- `speed`: integer 1 to 10; anything outside that is rejected with
+  `InvalidRequest`. Only meaningful for effects that take a speed;
+  always present. The four hardware effects accept 1 to 4, and the
+  daemon clamps into that range rather than rejecting the request.
 - `brightness`: `"Low"` or `"High"`.
 
 ### Effects
@@ -294,13 +389,13 @@ protocol, but hardware effects survive a daemon stop.
 ## Example session
 
 ```text
-C: {"id":1,"req":{"type":"Hello","protocol_version":1}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":1,"daemon_version":"0.21.0"}}
+C: {"id":1,"req":{"type":"Hello","protocol_version":2}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":2,"daemon_version":"0.24.0"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}
 S: {"id":3,"resp":{"type":"State","state":{...}}}
-C: {"id":4,"req":{"type":"SwitchProfile","name":"gaming"}}
+C: {"id":4,"req":{"type":"SelectSlot","slot":"Second"}}
 S: {"event":{"type":"StateChanged","state":{...}}}
 S: {"id":4,"resp":{"type":"Ok"}}
 ```

@@ -1,7 +1,7 @@
 //! The Profiles page: saved profiles as a boxed list, activate to apply,
 //! plus save-current-as and delete.
 
-use aurora_protocol::profile::Profile;
+use aurora_protocol::ipc::ProfileSummary;
 use relm4::{
     adw::{self, prelude::*},
     gtk,
@@ -66,12 +66,10 @@ pub fn build(sender: &ComponentSender<App>) -> ProfilesPage {
 
 impl ProfilesPage {
     /// Rebuild the list when the set of saved profiles changed.
-    pub fn sync(&mut self, profiles: &[Profile], current_name: Option<&str>, sender: &ComponentSender<App>) {
+    pub fn sync(&mut self, profiles: &[ProfileSummary], current_name: Option<&str>, sender: &ComponentSender<App>) {
         let mut names: Vec<String> = Vec::with_capacity(profiles.len());
         for profile in profiles {
-            if let Some(name) = &profile.name {
-                names.push(name.clone());
-            }
+            names.push(profile.name.clone());
         }
 
         if names == self.shown_names {
