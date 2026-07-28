@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-07-27
+
 ### Added
 
 - Optional subsystems report their own state, so a feature that cannot
@@ -191,7 +193,8 @@ the point versioning started.
   IdeaPad, and LOQ laptops, via the driver from
   [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB).
 
-[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.24.0
 [0.23.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/HughScott2002/Aurora-Legion/releases/tag/v0.21.0

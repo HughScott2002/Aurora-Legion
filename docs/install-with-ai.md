@@ -57,7 +57,7 @@ Use the installed CLI or the AppImage path:
 
 ```console
 $ aurora status
-daemon:   running (v0.23.0)
+daemon:   running (v0.24.0)
 keyboard: connected
 $ aurora set -e Static \
     -c 255,0,0,0,255,0,0,0,255,255,255,255

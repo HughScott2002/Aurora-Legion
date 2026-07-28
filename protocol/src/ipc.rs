@@ -470,7 +470,7 @@ mod tests {
             id: 1,
             resp: Response::Hello {
                 protocol_version: PROTOCOL_VERSION,
-                daemon_version: "0.23.0".to_string(),
+                daemon_version: "0.24.0".to_string(),
             },
         };
 
