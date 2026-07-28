@@ -9,7 +9,7 @@ use std::{
 };
 
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
-use aurora_protocol::profile::Profile;
+use aurora_protocol::profile::Lighting;
 
 use crate::engine::{effects::zones::KEY_ZONES, Inner};
 
@@ -21,7 +21,7 @@ enum RippleMove {
     Off,
 }
 
-pub fn play(manager: &mut Inner, p: &Profile) {
+pub fn play(manager: &mut Inner, p: &Lighting) {
     let stop_signals = manager.stop_signals.clone();
 
     let kill_thread = Arc::new(AtomicBool::new(false));

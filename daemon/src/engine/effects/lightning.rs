@@ -1,11 +1,11 @@
 use std::{sync::atomic::Ordering, thread, time::Duration};
 
-use aurora_protocol::profile::Profile;
+use aurora_protocol::profile::Lighting;
 use rand::{rngs::ThreadRng, Rng};
 
 use crate::engine::Inner;
 
-pub fn play(manager: &mut Inner, p: &Profile, rng: &mut ThreadRng) {
+pub fn play(manager: &mut Inner, p: &Lighting, rng: &mut ThreadRng) {
     while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
         let profile_array = p.rgb_array();
 

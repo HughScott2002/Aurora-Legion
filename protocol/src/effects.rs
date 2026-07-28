@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
-#[derive(Clone, Copy, EnumString, Serialize, Deserialize, Display, EnumIter, Debug, IntoStaticStr, Default)]
+#[derive(Clone, Copy, EnumString, Serialize, Deserialize, Display, EnumIter, Debug, IntoStaticStr, Default, PartialEq)]
 pub enum Effects {
     #[default]
     Static,
@@ -35,16 +35,20 @@ pub enum SwipeMode {
     Fill,
 }
 
-// Two `Effects` values are the same effect even when their inner settings
-// (fps, swipe mode, ...) differ. Selection UIs and profile switching rely on
-// this discriminant-only comparison.
-impl PartialEq for Effects {
-    fn eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
-    }
-}
-
 impl Effects {
+    /// True when both values name the same effect, ignoring inner settings
+    /// (fps, swipe mode, ...). Effect *selectors* want this: reselecting
+    /// "Ambient" in a combo row is not a change.
+    ///
+    /// Equality is structural, so change detection sees a new fps or a new
+    /// swipe mode. Using `==` where `same_variant` belongs makes a selector
+    /// fire on every settings tweak; using `same_variant` where `==` belongs
+    /// silently drops those tweaks. That second mistake is the one this
+    /// method exists to prevent.
+    pub fn same_variant(self, other: Self) -> bool {
+        core::mem::discriminant(&self) == core::mem::discriminant(&other)
+    }
+
     pub fn takes_color_array(self) -> bool {
         matches!(self, Self::Static | Self::Breath | Self::Lightning | Self::Swipe { .. } | Self::Fade | Self::Ripple)
     }

@@ -6,7 +6,7 @@
 //! [`IpcUpdate`] messages through the relm4 sender.
 
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::net::UnixStream,
     thread,
     time::Duration,
@@ -30,6 +30,9 @@ pub enum IpcUpdate {
     Disconnected,
     State(Box<DaemonState>),
     RequestFailed(String),
+    /// The daemon speaks a protocol this build cannot talk to. Terminal:
+    /// the worker stops reconnecting, because retrying cannot fix it.
+    Incompatible(String),
 }
 
 /// GUI-side handle: fire-and-forget requests.
@@ -86,16 +89,29 @@ where
         attempt_count = 0;
         deliver(IpcUpdate::Connected);
 
-        serve_connection(stream, request_rx, deliver);
+        let outcome = serve_connection(stream, request_rx, deliver);
 
         deliver(IpcUpdate::Disconnected);
+
+        if outcome == SessionOutcome::Incompatible {
+            // Reconnecting cannot change the daemon's protocol version.
+            return;
+        }
     }
+}
+
+/// Why a connection ended. Only a version mismatch stops the worker;
+/// everything else is worth reconnecting for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionOutcome {
+    Closed,
+    Incompatible,
 }
 
 /// Runs until the connection dies. Sends Subscribe + GetState first, then
 /// pumps the write queue on this thread while a reader thread forwards
 /// server lines.
-fn serve_connection<F>(stream: UnixStream, request_rx: &Receiver<Request>, deliver: &F)
+fn serve_connection<F>(stream: UnixStream, request_rx: &Receiver<Request>, deliver: &F) -> SessionOutcome
 where
     F: Fn(IpcUpdate) + Send + Clone + 'static,
 {
@@ -103,14 +119,12 @@ where
         Ok(clone) => clone,
         Err(error) => {
             eprintln!("ipc: could not clone stream: {error}");
-            return;
+            return SessionOutcome::Closed;
         }
     };
 
     let deliver_for_reader = deliver.clone();
-    let reader_handle = thread::spawn(move || {
-        reader_loop(read_stream, &deliver_for_reader);
-    });
+    let reader_handle = thread::spawn(move || reader_loop(read_stream, &deliver_for_reader));
 
     let mut writer = stream;
     let mut next_id: u64 = 1;
@@ -122,8 +136,7 @@ where
     ];
     for request in handshake {
         if !write_request(&mut writer, &mut next_id, &request) {
-            let _ = reader_handle.join();
-            return;
+            return join_reader(reader_handle);
         }
     }
 
@@ -151,7 +164,14 @@ where
     if shutdown_result.is_err() {
         // Already closed; nothing to do.
     }
-    let _ = reader_handle.join();
+    join_reader(reader_handle)
+}
+
+fn join_reader(handle: thread::JoinHandle<SessionOutcome>) -> SessionOutcome {
+    match handle.join() {
+        Ok(outcome) => outcome,
+        Err(_) => SessionOutcome::Closed,
+    }
 }
 
 fn write_request(writer: &mut UnixStream, next_id: &mut u64, request: &Request) -> bool {
@@ -173,7 +193,7 @@ fn write_request(writer: &mut UnixStream, next_id: &mut u64, request: &Request) 
     write_result.is_ok()
 }
 
-fn reader_loop<F>(stream: UnixStream, deliver: &F)
+fn reader_loop<F>(stream: UnixStream, deliver: &F) -> SessionOutcome
 where
     F: Fn(IpcUpdate),
 {
@@ -183,18 +203,18 @@ where
     loop {
         line.clear();
 
-        let read_result = reader.read_line(&mut line);
+        let read_result = (&mut reader).take(MAX_LINE_BYTES as u64 + 1).read_line(&mut line);
         match read_result {
-            Ok(0) => return, // Daemon closed the connection.
+            Ok(0) => return SessionOutcome::Closed, // Daemon closed the connection.
             Ok(bytes_read) => {
                 if bytes_read > MAX_LINE_BYTES {
                     eprintln!("ipc: daemon sent an oversized line, disconnecting");
-                    return;
+                    return SessionOutcome::Closed;
                 }
             }
             Err(error) => {
                 eprintln!("ipc: read failed: {error}");
-                return;
+                return SessionOutcome::Closed;
             }
         }
 
@@ -219,20 +239,23 @@ where
             ServerMessage::Response(envelope) => match envelope.resp {
                 Response::State { state } => deliver(IpcUpdate::State(Box::new(state))),
                 Response::Hello { protocol_version, daemon_version } => {
-                    // Mismatch is surfaced but the connection stays up: the
-                    // state view may still render, and the message tells the
-                    // user why anything else misbehaves.
+                    // A mismatch is terminal. v2 moved lighting into
+                    // Profile::slots, so a mismatched peer would parse
+                    // state it cannot represent and send requests the other
+                    // side cannot honour. Staying connected and hoping is
+                    // worse than saying so and stopping.
                     if protocol_version != PROTOCOL_VERSION {
-                        deliver(IpcUpdate::RequestFailed(format!(
-                            "daemon {daemon_version} speaks protocol v{protocol_version}, this app speaks v{PROTOCOL_VERSION}; update the older side"
+                        deliver(IpcUpdate::Incompatible(format!(
+                            "Daemon {daemon_version} speaks protocol v{protocol_version}, this app speaks v{PROTOCOL_VERSION}. Update whichever is older."
                         )));
+                        return SessionOutcome::Incompatible;
                     }
                 }
                 Response::Error { kind, message } => {
                     deliver(IpcUpdate::RequestFailed(format!("{kind:?}: {message}")));
                 }
-                Response::Ok | Response::Profiles { .. } | Response::CustomEffects { .. } => {
-                    // Fire-and-forget acknowledgements; state events carry
+                Response::Ok => {
+                    // Fire-and-forget acknowledgement; state events carry
                     // everything the GUI renders.
                 }
             },

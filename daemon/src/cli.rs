@@ -8,8 +8,8 @@ use std::{convert::TryInto, path::PathBuf, process::ExitCode, str::FromStr};
 use aurora_protocol::{
     custom_effect::CustomEffect,
     effects::{Brightness, Direction, Effects},
-    ipc::{Request, Response},
-    profile::{arr_to_zones, Profile},
+    ipc::{Request, Response, SlotSelection},
+    profile::{arr_to_zones, Lighting, Profile, SLOT_COUNT},
 };
 use clap::{Args, Subcommand};
 use strum::IntoEnumIterator;
@@ -34,6 +34,9 @@ pub enum ClientCommand {
     /// Switch to the next saved profile
     CycleProfile,
 
+    /// Show or change the active Fn+Space slot
+    Slot(SlotArgs),
+
     /// Load and apply a profile from a file
     LoadProfile {
         #[arg(short, long)]
@@ -51,6 +54,23 @@ pub enum ClientCommand {
 
     /// Ask a running daemon to exit
     Shutdown,
+}
+
+#[derive(Args)]
+pub struct SlotArgs {
+    /// Slot to select: 1, 2, 3, or off. Omit to print the active slot.
+    #[arg(value_parser = parse_slot)]
+    slot: Option<SlotSelection>,
+}
+
+fn parse_slot(arg: &str) -> Result<SlotSelection, String> {
+    match arg.trim().to_ascii_lowercase().as_str() {
+        "1" => Ok(SlotSelection::First),
+        "2" => Ok(SlotSelection::Second),
+        "3" => Ok(SlotSelection::Third),
+        "off" => Ok(SlotSelection::Off),
+        other => Err(format!("unknown slot '{other}', expected 1, 2, 3 or off")),
+    }
 }
 
 #[derive(Args)]
@@ -74,6 +94,10 @@ pub struct SetArgs {
     /// The direction of the effect (if applicable) [possible values: Left, Right]
     #[arg(short, long, value_parser = parse_direction)]
     direction: Option<Direction>,
+
+    /// Slot to write: 1, 2, 3. Defaults to the active slot.
+    #[arg(long, value_parser = parse_slot)]
+    slot: Option<SlotSelection>,
 
     /// A filename to save the profile at
     #[arg(long)]
@@ -125,6 +149,7 @@ pub fn run(command: ClientCommand) -> ExitCode {
         ClientCommand::Status => run_status(),
         ClientCommand::Set(args) => run_set(&args),
         ClientCommand::CycleProfile => run_simple_request(Request::CycleProfile, "profile cycled"),
+        ClientCommand::Slot(args) => run_slot(&args),
         ClientCommand::LoadProfile { path } => run_load_profile(&path),
         ClientCommand::CustomEffect { path } => run_custom_effect(&path),
         ClientCommand::Stop => run_simple_request(Request::StopCustomEffect, "custom effect stopped"),
@@ -166,28 +191,60 @@ fn run_status() -> ExitCode {
         aurora_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
     }
 
-    let profile_name = state.current.name.unwrap_or_else(|| "(unsaved)".to_string());
-    println!("profile:  {profile_name} ({} effect)", state.current.effect);
-    if let Some(slot) = state.hardware_slot {
-        if slot == aurora_protocol::ipc::HARDWARE_SLOT_OFF {
-            println!("hw slot:  backlight off (Fn+Space)");
-        } else {
-            println!("hw slot:  {slot} of {}", aurora_protocol::ipc::HARDWARE_SLOT_COUNT);
+    let profile_name = state.current.name.clone().unwrap_or_else(|| "(unsaved)".to_string());
+    println!("profile:  {profile_name}");
+
+    match state.active_slot.index() {
+        Some(slot_index) => {
+            let lighting = &state.current.slots[slot_index];
+            println!("slot:     {} of {SLOT_COUNT} ({} effect)", state.active_slot, lighting.effect);
         }
+        None => println!("slot:     off (Fn+Space turns the backlight back on)"),
     }
-    if let Some(name) = state.custom_effect_playing {
+
+    if let Some(name) = &state.custom_effect_playing {
         println!("playing:  custom effect '{name}'");
+    }
+    if let Some(message) = &state.settings_error {
+        println!("settings: NOT SAVING ({message})");
     }
 
     let mut saved_names: Vec<String> = Vec::new();
     for profile in &state.profiles {
-        if let Some(name) = &profile.name {
-            saved_names.push(name.clone());
-        }
+        saved_names.push(profile.name.clone());
     }
     println!("saved:    {} profiles ({})", state.profiles.len(), saved_names.join(", "));
 
     ExitCode::SUCCESS
+}
+
+fn run_slot(args: &SlotArgs) -> ExitCode {
+    let mut client = match Client::connect() {
+        Ok(client) => client,
+        Err(_) => {
+            eprintln!("aurora: no daemon is running; slots are daemon state.");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let Some(slot) = args.slot else {
+        let response = match client.request(Request::GetState) {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!("aurora: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let Response::State { state } = response else {
+            eprintln!("aurora: unexpected response to GetState");
+            return ExitCode::FAILURE;
+        };
+        println!("{}", state.active_slot);
+        return ExitCode::SUCCESS;
+    };
+
+    let response = client.request(Request::SelectSlot { slot });
+    print_outcome(response, &format!("slot {slot} selected"))
 }
 
 fn run_set(args: &SetArgs) -> ExitCode {
@@ -203,8 +260,7 @@ fn run_set(args: &SetArgs) -> ExitCode {
         [0; 12]
     };
 
-    let mut profile = Profile {
-        name: None,
+    let lighting = Lighting {
         rgb_zones: arr_to_zones(rgb_array),
         effect: args.effect,
         direction: args.direction.unwrap_or_default(),
@@ -213,6 +269,8 @@ fn run_set(args: &SetArgs) -> ExitCode {
     };
 
     if let Some(save_path) = &args.save {
+        // A saved file is a whole profile, so every slot gets this look.
+        let mut profile = Profile::from_uniform_lighting(None, lighting.clone());
         let save_result = profile.save_profile(save_path);
         if save_result.is_err() {
             eprintln!("aurora: could not save profile to {}", save_path.display());
@@ -221,7 +279,17 @@ fn run_set(args: &SetArgs) -> ExitCode {
         println!("profile saved to {}", save_path.display());
     }
 
-    apply_profile(profile)
+    match Client::connect() {
+        Ok(mut client) => {
+            let request = Request::SetLighting {
+                slot: args.slot,
+                lighting,
+            };
+            let response = client.request(request);
+            print_outcome(response, "lighting applied")
+        }
+        Err(_) => apply_lighting_directly(&lighting),
+    }
 }
 
 fn run_load_profile(path: &PathBuf) -> ExitCode {
@@ -233,22 +301,23 @@ fn run_load_profile(path: &PathBuf) -> ExitCode {
         }
     };
 
-    apply_profile(profile)
-}
-
-fn apply_profile(profile: Profile) -> ExitCode {
     match Client::connect() {
         Ok(mut client) => {
             let response = client.request(Request::SetProfile { profile });
             print_outcome(response, "profile applied")
         }
-        Err(_) => apply_profile_directly(&profile),
+        Err(_) => {
+            // No daemon means no slot state, so the first slot is the only
+            // sensible thing to show.
+            let first_slot = &profile.slots[0];
+            apply_lighting_directly(first_slot)
+        }
     }
 }
 
-fn apply_profile_directly(profile: &Profile) -> ExitCode {
-    if !profile.effect.is_built_in() {
-        eprintln!("aurora: no daemon is running, and the {} effect needs one (it is software-driven).", profile.effect);
+fn apply_lighting_directly(lighting: &Lighting) -> ExitCode {
+    if !lighting.effect.is_built_in() {
+        eprintln!("aurora: no daemon is running, and the {} effect needs one (it is software-driven).", lighting.effect);
         eprintln!("           start the daemon with: aurora daemon");
         return ExitCode::FAILURE;
     }
@@ -265,33 +334,11 @@ fn apply_profile_directly(profile: &Profile) -> ExitCode {
     };
 
     let engine = EffectManager::new(*keyboard, stop_signals);
-    engine.set_profile(profile.clone());
+    engine.set_lighting(lighting.clone());
     engine.shutdown();
 
     // Hardware effects persist after we exit; nothing else to do.
     ExitCode::SUCCESS
-}
-
-fn run_custom_effect(path: &PathBuf) -> ExitCode {
-    let effect = match CustomEffect::from_file(path) {
-        Ok(effect) => effect,
-        Err(_) => {
-            eprintln!("aurora: could not load custom effect from {}", path.display());
-            return ExitCode::FAILURE;
-        }
-    };
-
-    match Client::connect() {
-        Ok(mut client) => {
-            let response = client.request(Request::PlayCustomEffect { effect });
-            print_outcome(response, "custom effect playing")
-        }
-        Err(_) => {
-            eprintln!("aurora: no daemon is running; custom effects need one.");
-            eprintln!("           start the daemon with: aurora daemon");
-            ExitCode::FAILURE
-        }
-    }
 }
 
 fn run_simple_request(request: Request, success_message: &str) -> ExitCode {
@@ -323,6 +370,28 @@ fn print_outcome(response: Result<Response, ClientError>, success_message: &str)
         }
         Err(error) => {
             eprintln!("aurora: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_custom_effect(path: &PathBuf) -> ExitCode {
+    let effect = match CustomEffect::from_file(path) {
+        Ok(effect) => effect,
+        Err(_) => {
+            eprintln!("aurora: could not load custom effect from {}", path.display());
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match Client::connect() {
+        Ok(mut client) => {
+            let response = client.request(Request::PlayCustomEffect { effect });
+            print_outcome(response, "custom effect playing")
+        }
+        Err(_) => {
+            eprintln!("aurora: no daemon is running; custom effects need one.");
+            eprintln!("           start the daemon with: aurora daemon");
             ExitCode::FAILURE
         }
     }

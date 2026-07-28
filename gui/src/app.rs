@@ -8,8 +8,8 @@ use std::cell::Cell;
 
 use aurora_protocol::{
     effects::{Brightness, Direction, Effects, SwipeMode},
-    ipc::{DaemonState, KeyboardStatus, Request, HARDWARE_SLOT_COUNT, HARDWARE_SLOT_OFF},
-    profile::Profile,
+    ipc::{DaemonState, KeyboardStatus, Request, SlotSelection},
+    profile::{Lighting, SLOT_COUNT},
 };
 use relm4::{
     adw::{self, prelude::*},
@@ -29,8 +29,10 @@ const WINDOW_DEFAULT_HEIGHT: i32 = 720;
 pub struct App {
     connected: bool,
     state: Option<DaemonState>,
-    /// Optimistic copy of the live profile; widget edits land here first.
-    profile: Profile,
+    /// Optimistic copy of the active slot's lighting; widget edits land
+    /// here first. Phase 3 removes this in favour of rendering the daemon
+    /// snapshot directly.
+    lighting: Lighting,
     ipc: IpcHandle,
 
     autostart_available: bool,
@@ -46,6 +48,11 @@ pub struct App {
 
     /// Toast queued by update(), shown and cleared by update_view().
     pending_toast: Cell<Option<String>>,
+
+    /// Set when the daemon speaks a protocol this build cannot talk to.
+    /// The connection worker has stopped by then, so this is permanent
+    /// until the app restarts against a matching daemon.
+    incompatible: Option<String>,
 }
 
 #[derive(Debug)]
@@ -84,6 +91,7 @@ pub enum AppMsg {
 
 pub struct AppWidgets {
     toast_overlay: adw::ToastOverlay,
+    status_page: adw::StatusPage,
     permission_banner: adw::Banner,
     content_stack: gtk::Stack,
     start_button: gtk::Button,
@@ -119,7 +127,7 @@ impl SimpleComponent for App {
         let model = App {
             connected: false,
             state: None,
-            profile: Profile::default(),
+            lighting: Lighting::default(),
             ipc,
             autostart_available: false,
             autostart_enabled: false,
@@ -127,6 +135,7 @@ impl SimpleComponent for App {
             daemon_start_pending: false,
             keyboard_seen: false,
             pending_toast: Cell::new(None),
+            incompatible: None,
         };
 
         // Query systemd availability now, not on first connect: the Start
@@ -235,6 +244,7 @@ impl SimpleComponent for App {
 
         let widgets = AppWidgets {
             toast_overlay,
+            status_page,
             permission_banner,
             content_stack,
             start_button,
@@ -255,65 +265,66 @@ impl SimpleComponent for App {
                 let Some(selected) = effect_by_index(index) else {
                     return;
                 };
-                // Discriminant-only equality: reselecting the same effect
-                // (even with different inner settings) is a no-op.
-                if selected == self.profile.effect {
+                // Reselecting the same effect is a no-op even when its
+                // inner settings differ; that is what same_variant is for.
+                // Structural equality here would refire on every fps tweak.
+                if selected.same_variant(self.lighting.effect) {
                     return;
                 }
-                self.profile.effect = selected;
-                self.push_profile();
+                self.lighting.effect = selected;
+                self.push_lighting();
             }
             AppMsg::ZoneColorPicked { zone_index, color } => {
-                if zone_index >= self.profile.rgb_zones.len() {
+                if zone_index >= self.lighting.rgb_zones.len() {
                     return;
                 }
-                if self.profile.rgb_zones[zone_index].rgb == color {
+                if self.lighting.rgb_zones[zone_index].rgb == color {
                     return;
                 }
-                self.profile.rgb_zones[zone_index].rgb = color;
-                self.push_profile();
+                self.lighting.rgb_zones[zone_index].rgb = color;
+                self.push_lighting();
             }
             AppMsg::GlobalColorDialogRequested => {
-                show_global_color_dialog(self.profile.rgb_zones[0].rgb, &sender);
+                show_global_color_dialog(self.lighting.rgb_zones[0].rgb, &sender);
             }
             AppMsg::GlobalColorPicked { color } => {
                 let mut changed = false;
-                for zone in &mut self.profile.rgb_zones {
+                for zone in &mut self.lighting.rgb_zones {
                     if zone.rgb != color {
                         zone.rgb = color;
                         changed = true;
                     }
                 }
                 if changed {
-                    self.push_profile();
+                    self.push_lighting();
                 }
             }
             AppMsg::SpeedPicked { speed } => {
-                if self.profile.speed == speed {
+                if self.lighting.speed == speed {
                     return;
                 }
-                self.profile.speed = speed;
-                self.push_profile();
+                self.lighting.speed = speed;
+                self.push_lighting();
             }
             AppMsg::BrightnessPicked { high } => {
                 let brightness = if high { Brightness::High } else { Brightness::Low };
-                if self.profile.brightness == brightness {
+                if self.lighting.brightness == brightness {
                     return;
                 }
-                self.profile.brightness = brightness;
-                self.push_profile();
+                self.lighting.brightness = brightness;
+                self.push_lighting();
             }
             AppMsg::DirectionPicked { index } => {
                 let direction = if index == 0 { Direction::Left } else { Direction::Right };
-                if self.profile.direction == direction {
+                if self.lighting.direction == direction {
                     return;
                 }
-                self.profile.direction = direction;
-                self.push_profile();
+                self.lighting.direction = direction;
+                self.push_lighting();
             }
             AppMsg::SwipeModePicked { index } => {
                 let picked_mode = if index == 0 { SwipeMode::Change } else { SwipeMode::Fill };
-                let changed = match &mut self.profile.effect {
+                let changed = match &mut self.lighting.effect {
                     Effects::Swipe { mode, .. } | Effects::SmoothWave { mode, .. } => {
                         if *mode == picked_mode {
                             false
@@ -325,11 +336,11 @@ impl SimpleComponent for App {
                     _ => false,
                 };
                 if changed {
-                    self.push_profile();
+                    self.push_lighting();
                 }
             }
             AppMsg::CleanWithBlackPicked { clean } => {
-                let changed = match &mut self.profile.effect {
+                let changed = match &mut self.lighting.effect {
                     Effects::Swipe { clean_with_black, .. } | Effects::SmoothWave { clean_with_black, .. } => {
                         if *clean_with_black == clean {
                             false
@@ -341,11 +352,11 @@ impl SimpleComponent for App {
                     _ => false,
                 };
                 if changed {
-                    self.push_profile();
+                    self.push_lighting();
                 }
             }
             AppMsg::AmbientFpsPicked { fps: picked_fps } => {
-                let changed = match &mut self.profile.effect {
+                let changed = match &mut self.lighting.effect {
                     Effects::AmbientLight { fps, .. } => {
                         if *fps == picked_fps {
                             false
@@ -357,11 +368,11 @@ impl SimpleComponent for App {
                     _ => false,
                 };
                 if changed {
-                    self.push_profile();
+                    self.push_lighting();
                 }
             }
             AppMsg::AmbientSaturationPicked { saturation: picked } => {
-                let changed = match &mut self.profile.effect {
+                let changed = match &mut self.lighting.effect {
                     Effects::AmbientLight { saturation_boost, .. } => {
                         if (*saturation_boost - picked).abs() < 0.001 {
                             false
@@ -373,7 +384,7 @@ impl SimpleComponent for App {
                     _ => false,
                 };
                 if changed {
-                    self.push_profile();
+                    self.push_lighting();
                 }
             }
 
@@ -391,26 +402,18 @@ impl SimpleComponent for App {
                     self.queue_toast("Profile name cannot be empty");
                     return;
                 }
-                self.profile.name = Some(name);
-                self.ipc.send(Request::AddProfile { profile: self.profile.clone() });
-                self.push_profile();
-            }
-
-            AppMsg::CustomEffectPlayed { name } => {
                 let Some(state) = &self.state else {
                     return;
                 };
-                let mut found = None;
-                for effect in &state.custom_effects {
-                    if effect.name.as_deref() == Some(name.as_str()) {
-                        found = Some(effect.clone());
-                        break;
-                    }
-                }
-                match found {
-                    Some(effect) => self.ipc.send(Request::PlayCustomEffect { effect }),
-                    None => self.queue_toast(&format!("Custom effect “{name}” not found")),
-                }
+                let mut profile = state.current.clone();
+                profile.name = Some(name);
+                self.ipc.send(Request::AddProfile { profile });
+            }
+
+            AppMsg::CustomEffectPlayed { name } => {
+                // By name: the daemon holds the body, so it never travels
+                // back to the process that stored it.
+                self.ipc.send(Request::PlayCustomEffectByName { name });
             }
             AppMsg::CustomEffectDeleted { name } => {
                 self.ipc.send(Request::DeleteCustomEffect { name });
@@ -480,6 +483,16 @@ impl SimpleComponent for App {
 
     fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
         // --- Connection state ---------------------------------------------
+        // A protocol mismatch replaces the status page text: retrying is
+        // pointless, so the page must stop offering to start a daemon.
+        if let Some(message) = &self.incompatible {
+            widgets.status_page.set_title("Incompatible Daemon");
+            widgets.status_page.set_description(Some(message));
+            if widgets.start_button.is_visible() {
+                widgets.start_button.set_visible(false);
+            }
+        }
+
         let visible_child = if self.connected { "main" } else { "disconnected" };
         let current_child = widgets.content_stack.visible_child_name();
         if current_child.as_deref() != Some(visible_child) {
@@ -545,7 +558,7 @@ impl SimpleComponent for App {
         }
 
         // --- Other pages ----------------------------------------------------
-        widgets.profiles.sync(&state.profiles, self.profile.name.as_deref(), &sender);
+        widgets.profiles.sync(&state.profiles, state.current.name.as_deref(), &sender);
         widgets.custom.sync(&state.custom_effects, state.custom_effect_playing.as_deref(), &sender);
 
         // --- Daemon page ----------------------------------------------------
@@ -602,19 +615,30 @@ impl App {
                     self.keyboard_seen = true;
                 }
 
-                self.profile = state.current.clone();
+                self.lighting = active_lighting(&state);
                 self.state = Some(*state);
             }
             IpcUpdate::RequestFailed(message) => {
                 self.queue_toast(&message);
             }
+            IpcUpdate::Incompatible(message) => {
+                // Terminal: the worker has stopped, so the window says why
+                // rather than sitting on a reconnect spinner forever.
+                self.connected = false;
+                self.state = None;
+                self.incompatible = Some(message);
+            }
         }
     }
 
-    /// Send the local profile to the daemon; the resulting StateChanged
-    /// event confirms it (and updates every other connected client).
-    fn push_profile(&self) {
-        self.ipc.send(Request::SetProfile { profile: self.profile.clone() });
+    /// Send the local lighting to the daemon, targeting whichever slot is
+    /// active; the resulting StateChanged event confirms it (and updates
+    /// every other connected client).
+    fn push_lighting(&self) {
+        self.ipc.send(Request::SetLighting {
+            slot: None,
+            lighting: self.lighting.clone(),
+        });
     }
 
     fn queue_toast(&self, text: &str) {
@@ -651,14 +675,14 @@ impl App {
 
     fn sync_lighting_page(&self, page: &lighting::LightingPage) {
         // Effect combo.
-        if let Some(index) = effect_index(self.profile.effect) {
+        if let Some(index) = effect_index(self.lighting.effect) {
             if page.effect_row.selected() != index as u32 {
                 page.effect_row.set_selected(index as u32);
             }
         }
 
         // Zone colors.
-        for (button, zone) in page.zone_buttons.iter().zip(self.profile.rgb_zones.iter()) {
+        for (button, zone) in page.zone_buttons.iter().zip(self.lighting.rgb_zones.iter()) {
             let shown = lighting::rgba_to_bytes(&button.rgba());
             if shown != zone.rgb {
                 button.set_rgba(&lighting::bytes_to_rgba(zone.rgb));
@@ -667,16 +691,16 @@ impl App {
 
         // Options.
         let shown_speed = page.speed_row.value() as u8;
-        if shown_speed != self.profile.speed {
-            page.speed_row.set_value(f64::from(self.profile.speed));
+        if shown_speed != self.lighting.speed {
+            page.speed_row.set_value(f64::from(self.lighting.speed));
         }
 
-        let high = self.profile.brightness == Brightness::High;
+        let high = self.lighting.brightness == Brightness::High;
         if page.brightness_row.is_active() != high {
             page.brightness_row.set_active(high);
         }
 
-        let direction_index: u32 = match self.profile.direction {
+        let direction_index: u32 = match self.lighting.direction {
             Direction::Left => 0,
             Direction::Right => 1,
         };
@@ -685,25 +709,25 @@ impl App {
         }
 
         // Sensitivity follows what the effect supports.
-        let takes_colors = self.profile.effect.takes_color_array();
+        let takes_colors = self.lighting.effect.takes_color_array();
         if page.colors_group.is_sensitive() != takes_colors {
             page.colors_group.set_sensitive(takes_colors);
         }
-        let takes_speed = self.profile.effect.takes_speed();
+        let takes_speed = self.lighting.effect.takes_speed();
         if page.speed_row.is_sensitive() != takes_speed {
             page.speed_row.set_sensitive(takes_speed);
         }
-        let takes_direction = self.profile.effect.takes_direction();
+        let takes_direction = self.lighting.effect.takes_direction();
         if page.direction_row.is_sensitive() != takes_direction {
             page.direction_row.set_sensitive(takes_direction);
         }
 
         // Per-effect groups.
-        let is_ambient = matches!(self.profile.effect, Effects::AmbientLight { .. });
+        let is_ambient = matches!(self.lighting.effect, Effects::AmbientLight { .. });
         if page.ambient_group.is_visible() != is_ambient {
             page.ambient_group.set_visible(is_ambient);
         }
-        if let Effects::AmbientLight { fps, saturation_boost } = self.profile.effect {
+        if let Effects::AmbientLight { fps, saturation_boost } = self.lighting.effect {
             let shown_fps = page.fps_row.value() as u8;
             if shown_fps != fps {
                 page.fps_row.set_value(f64::from(fps));
@@ -714,11 +738,11 @@ impl App {
             }
         }
 
-        let is_swipe = matches!(self.profile.effect, Effects::Swipe { .. } | Effects::SmoothWave { .. });
+        let is_swipe = matches!(self.lighting.effect, Effects::Swipe { .. } | Effects::SmoothWave { .. });
         if page.swipe_group.is_visible() != is_swipe {
             page.swipe_group.set_visible(is_swipe);
         }
-        if let Effects::Swipe { mode, clean_with_black } | Effects::SmoothWave { mode, clean_with_black } = self.profile.effect {
+        if let Effects::Swipe { mode, clean_with_black } | Effects::SmoothWave { mode, clean_with_black } = self.lighting.effect {
             let mode_index: u32 = match mode {
                 SwipeMode::Change => 0,
                 SwipeMode::Fill => 1,
@@ -735,36 +759,44 @@ impl App {
             }
         }
 
-        // Hardware slot caption (Fn+Space). Hidden when the daemon cannot
-        // read the slot, so unsupported machines see nothing new.
-        let hardware_slot = self.state.as_ref().and_then(|state| state.hardware_slot);
-        let slot_text = match hardware_slot {
-            Some(HARDWARE_SLOT_OFF) => Some("Keyboard backlight is off. Press Fn+Space to turn it back on.".to_string()),
-            Some(slot) => Some(format!("Hardware profile {slot} of {HARDWARE_SLOT_COUNT}. Fn+Space switches profiles.")),
-            None => None,
+        // Slot caption. Phase 3 replaces this with a real slot control;
+        // until then it names the live slot.
+        let active_slot = match &self.state {
+            Some(state) => state.active_slot,
+            None => SlotSelection::First,
         };
-        let slot_visible = slot_text.is_some();
-        if let Some(text) = &slot_text {
-            if page.slot_label.text() != text.as_str() {
-                page.slot_label.set_text(text);
-            }
+        let slot_text = match active_slot {
+            SlotSelection::Off => "Backlight off. Press Fn+Space to turn it back on.".to_string(),
+            lit => format!("Slot {lit} of {SLOT_COUNT}. Fn+Space switches slots."),
+        };
+        if page.slot_label.text() != slot_text.as_str() {
+            page.slot_label.set_text(&slot_text);
         }
-        if page.slot_label.is_visible() != slot_visible {
-            page.slot_label.set_visible(slot_visible);
+        if !page.slot_label.is_visible() {
+            page.slot_label.set_visible(true);
         }
 
         // Preview. While the backlight is off the physical keyboard is
         // dark, so the preview shows that instead of the stored colors.
-        let backlight_off = hardware_slot == Some(HARDWARE_SLOT_OFF);
+        let backlight_off = active_slot == SlotSelection::Off;
         let mut preview_colors: [[u8; 3]; 4] = [[0; 3]; 4];
         if !backlight_off {
-            for (target, zone) in preview_colors.iter_mut().zip(self.profile.rgb_zones.iter()) {
+            for (target, zone) in preview_colors.iter_mut().zip(self.lighting.rgb_zones.iter()) {
                 if zone.enabled {
                     *target = zone.rgb;
                 }
             }
         }
         page.preview.set_colors(preview_colors);
+    }
+}
+
+/// The lighting the keyboard is showing: the active slot's, or darkness
+/// while the backlight is off.
+fn active_lighting(state: &DaemonState) -> Lighting {
+    match state.active_slot.index() {
+        Some(slot_index) => state.current.slots[slot_index].clone(),
+        None => Lighting::default(),
     }
 }
 
@@ -794,8 +826,7 @@ fn effect_by_index(index: usize) -> Option<Effects> {
 
 fn effect_index(effect: Effects) -> Option<usize> {
     for (index, candidate) in Effects::iter().enumerate() {
-        // Discriminant-only equality.
-        if candidate == effect {
+        if candidate.same_variant(effect) {
             return Some(index);
         }
     }

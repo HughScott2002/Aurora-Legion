@@ -6,6 +6,64 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Profiles now own their slots. A profile holds one lighting
+  configuration per Fn+Space slot, so switching slots moves between three
+  looks that belong to the same profile. A new profile starts red, green,
+  and blue. Saving a profile saves all three slots.
+- Slots are selectable, not only observable. `aurora slot 2` and
+  `aurora set --slot 2` reach a slot directly, and selecting one applies
+  it immediately. Fn+Space and client selection share one apply path, so
+  daemon state and the keyboard cannot disagree.
+- The startup slot decision now splits by what each source actually
+  knows. The controller decides lit versus off, because only it knows
+  whether the backlight was turned off while the daemon was down. The
+  stored selection decides which slot, because Aurora's own writes moved
+  the controller's counter during the previous session. An unreadable or
+  mid-transition counter decides nothing and the stored slot stands.
+- The IPC protocol is version 2. Lighting moved from `Profile` into
+  `Profile.slots`, so a v1 client would misread every profile. Clients
+  now stop on a version mismatch instead of staying connected and
+  parsing state they cannot represent.
+- State broadcasts carry profile and custom effect summaries instead of
+  full bodies, and `PlayCustomEffectByName` starts a stored effect
+  without sending it back to the daemon that holds it.
+
+### Fixed
+
+- Settings could be erased by a daemon that failed to read them. A file
+  that cannot be parsed now makes settings read-only for the session, so
+  shutdown cannot overwrite it with defaults.
+- Failed settings writes were reported as successes. `save` now returns
+  its error, the pending change stays pending, and the reason reaches
+  clients and `aurora status`.
+- Editing lighting while the backlight was off applied to the keyboard
+  but was stored nowhere, so the change vanished on the next restart.
+  The off position now rejects edits and says why.
+- A machine where the slot counter cannot be read no longer has its
+  lighting replaced by slot 1's at every startup.
+- The one megabyte line limit did not bound anything: the reader
+  allocated the whole line before checking it, and the writer never
+  checked at all, so an oversized broadcast disconnected every client
+  and then did it again on reconnect.
+- Effect comparison was discriminant-only everywhere, so changing
+  ambient frames per second or swipe mode could be detected as no change
+  at all. Equality is now structural, with `same_variant` for the effect
+  selector that wants the old behavior.
+
+### Migration
+
+- v1 settings convert on first run. The v1 per-slot lighting becomes the
+  live profile's slots, and each saved v1 profile becomes a profile whose
+  three slots match, so activating it looks the way it did before. The
+  active slot is recovered by matching the live lighting against the
+  slots. The original file is copied to `settings.json.v1-backup` first,
+  and the conversion does not write anything if that backup cannot be
+  secured.
+- Profile files written by earlier versions still load; a flat file is
+  lifted into all three slots.
+
 ### Added
 
 - Opt-in tracing behind the `AURORA_TRACE` environment variable. The
