@@ -6,6 +6,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-07-27
+
+### Fixed
+
+- The shipped udev rules granted nothing, so the documented install
+  ended in permission denied on any machine without hand-written rules.
+  Two faults, both needed fixing. They matched `/dev/hidraw*` while the
+  driver builds hidapi with the libusb backend and opens the raw USB
+  node. And they were numbered 99, while systemd's `73-seat-late.rules`
+  is what turns the `uaccess` tag into an ACL, so a rule sorting after
+  it tags the device and never gets the ACL applied. The rules now match
+  the USB node and ship as `70-aurora.rules`, installed through
+  `services.udev.packages` rather than `services.udev.extraRules`, which
+  writes the too-late `99-local.rules`. Affects every release up to and
+  including 0.24.0 (#20).
+
 ## [0.24.0] - 2026-07-27
 
 ### Added
@@ -193,7 +209,8 @@ the point versioning started.
   IdeaPad, and LOQ laptops, via the driver from
   [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB).
 
-[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.24.0
 [0.23.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.21.0...v0.22.0

@@ -115,7 +115,20 @@
               (lib.mkIf (hwCfg.enable || svcCfg.enable) {
                 # One rule per supported keyboard controller; the file also
                 # serves non-Nix installs (tarball, manual copy).
-                services.udev.extraRules = builtins.readFile ./udev/99-aurora.rules;
+                #
+                # `services.udev.packages`, not `extraRules`: extraRules
+                # writes 99-local.rules, and systemd's 73-seat-late.rules is
+                # what turns TAG+="uaccess" into an actual ACL. A rule that
+                # sorts after 73 tags the device and never gets the builtin
+                # run, so the keyboard ends up tagged uaccess with no ACL.
+                # The rules ship in their own tiny derivation so enabling
+                # only `hardware.aurora.enable` does not pull the whole
+                # package into the system closure.
+                services.udev.packages = [
+                  (pkgs.runCommand "aurora-udev-rules" { } ''
+                    install -Dm444 ${./udev/70-aurora.rules} $out/lib/udev/rules.d/70-aurora.rules
+                  '')
+                ];
               })
 
               (lib.mkIf svcCfg.enable {
@@ -293,6 +306,13 @@
                 install -Dm444 systemd/aurora.service -t $out/lib/systemd/user
                 substituteInPlace $out/lib/systemd/user/aurora.service \
                   --replace-fail "ExecStart=aurora daemon" "ExecStart=$out/bin/aurora daemon"
+
+                # Referenced by path rather than from $src: the cargo source
+                # filter deliberately excludes udev/, and pulling it in would
+                # invalidate the build cache on every rules edit. Shipping
+                # them here is what lets a consumer point
+                # services.udev.packages at the package itself.
+                install -Dm444 ${./udev/70-aurora.rules} $out/lib/udev/rules.d/70-aurora.rules
               '';
 
               # wrapGAppsHook4 turns bin/* into wrapper scripts; patch the

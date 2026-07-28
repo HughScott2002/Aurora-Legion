@@ -13,7 +13,7 @@
 | Temporary settings write | `settings.json.tmp` beside the settings file | Daemon |
 | AppImage daemon log | `~/.cache/aurora/appimage-daemon.log` | AppImage launcher |
 | Manual user unit | `~/.config/systemd/user/aurora.service` | Installer or user |
-| Manual udev rule | `/etc/udev/rules.d/99-aurora.rules` | Installer or administrator |
+| Manual udev rule | `/etc/udev/rules.d/70-aurora.rules` | Installer or administrator |
 
 The daemon creates the socket when it starts and removes it on clean
 shutdown. It treats a live socket as another running daemon.
@@ -58,7 +58,7 @@ Nix store paths vary. The package contains:
 | Desktop entry | `share/applications/io.github.HughScott2002.Aurora.desktop` |
 | Icon | `share/icons/hicolor/scalable/apps/io.github.HughScott2002.Aurora.svg` |
 
-The NixOS module embeds `udev/99-aurora.rules` from the source tree.
+The NixOS module embeds `udev/70-aurora.rules` from the source tree.
 
 ## Version 1 settings migration
 

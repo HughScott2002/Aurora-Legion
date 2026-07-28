@@ -20,7 +20,7 @@ Existing settings keep their saved colors.
 
 ```console
 $ aurora status
-daemon:   running (v0.24.0)
+daemon:   running (v0.24.1)
 keyboard: connected
 slot:     1 of 3 (Static effect)
 ```

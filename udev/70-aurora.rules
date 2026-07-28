@@ -1,0 +1,67 @@
+# Aurora keyboard access rules.
+#
+# Lets the logged-in (seat) user open the keyboard without root. One rule
+# per supported controller, mirroring KNOWN_DEVICE_INFOS in
+# driver/src/lib.rs. The NixOS module in flake.nix reads this file
+# verbatim.
+#
+# These match the raw USB device node (/dev/bus/usb/BBB/DDD), NOT
+# /dev/hidraw*. That is deliberate and load-bearing: driver/Cargo.toml
+# builds hidapi with `default-features = false, features =
+# ["linux-static-libusb"]`, so the driver reaches the device through
+# libusb and never opens a hidraw node. Rules written against
+# KERNEL=="hidraw*" match a device class Aurora does not use and grant
+# nothing at all. If the hidapi backend is ever switched to
+# linux-static-hidraw, these rules have to change with it.
+#
+# The RGB controller carries no keys. It contributes no input device, so
+# these rules cannot affect typing; the built-in keyboard is a separate
+# device, usually on the i8042 PS/2 controller.
+#
+# The 70- prefix is load-bearing. systemd's 73-seat-late.rules carries
+# the line that actually applies the ACL:
+#
+#   TAG=="uaccess", ENV{MAJOR}!="", RUN{builtin}+="uaccess"
+#
+# A rule numbered above 73 sets the tag after that line has already run,
+# so the tag is present on the device and the builtin never fires: the
+# device ends up tagged uaccess with no ACL on it. Anything that installs
+# these rules has to keep them sorting before 73, which rules out NixOS
+# `services.udev.extraRules` (it writes 99-local.rules); use
+# `services.udev.packages` instead.
+#
+# Manual install:
+#   sudo install -Dm644 70-aurora.rules /etc/udev/rules.d/70-aurora.rules
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# then replug the keyboard (or reboot).
+#
+# TAG+="uaccess" grants access to whoever is logged in at the seat, which
+# is the right boundary: no group membership to hand out, and no access
+# for other users. It is a dynamic ACL applied by systemd-logind at
+# session activation. If lighting stops after an upgrade and
+# `aurora status` reports permission denied, log out and back in;
+# docs/how-to/troubleshoot.md has the static fallback for setups where
+# that is not acceptable.
+
+# 2020
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c955", TAG+="uaccess"
+# 2021 Ideapad
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c963", TAG+="uaccess"
+# 2021
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c965", TAG+="uaccess"
+# 2022 Ideapad
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c973", TAG+="uaccess"
+# 2022
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c975", TAG+="uaccess"
+# 2023 LOQ
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c983", TAG+="uaccess"
+# 2023
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c984", TAG+="uaccess"
+# 2023 Pro
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c985", TAG+="uaccess"
+# 2024 LOQ
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c993", TAG+="uaccess"
+# 2024
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c994", TAG+="uaccess"
+# 2024 Pro
+SUBSYSTEM=="usb", ATTR{idVendor}=="048d", ATTR{idProduct}=="c995", TAG+="uaccess"
