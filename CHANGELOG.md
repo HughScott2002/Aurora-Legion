@@ -20,6 +20,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default, and rate limited when on.
 - `aurora slot` to show or select the active Fn+Space slot, and
   `aurora set --slot N` to write one slot without selecting it.
+- A slot control at the top of the app's Lighting page. Three slot rows
+  plus off, each with a colour chip and the effect it holds, the live one
+  marked. Clicking one selects it and applies it immediately, so slots
+  are reachable without the keyboard shortcut. When Fn+Space detection is
+  unavailable or degraded, the group says so and points at the rows.
 
 ### Changed
 
@@ -70,6 +75,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   process. Read errors are now told apart: an interrupted read retries,
   dropped events report degraded rather than claiming everything is
   fine, and anything else reopens the socket on a bounded backoff.
+- The keyboard preview showed stored zone colours under effects that
+  ignore them, so a rainbow effect could be drawn as four static colours.
+  It now shows nothing zone-coloured for those effects and darkness while
+  the backlight is off.
+- The preview split the keyboard into four equal bands when the real
+  zones cover 24, 29, 25 and 18 keys, putting every boundary in the wrong
+  place. Bands are now weighted by key count, so zone 4 is the numpad.
+- The app's connection worker kept reconnecting and delivering into a
+  dead runtime after the window closed, because relm4's input sender
+  reports send failures only to the log. It now stops when the component
+  is gone.
+- A daemon snapshot generated just before a local edit reached the daemon
+  could overwrite the control being dragged. Local edits keep precedence
+  for a short window; outside it the daemon is the source of truth.
 - Tracing could write megabytes an hour while a software effect ran,
   because every frame logged a line. Successful writes are now limited
   to one line per second, carrying the count of writes since the last

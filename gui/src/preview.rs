@@ -15,6 +15,12 @@ const KEY_ROWS: usize = 5;
 const KEY_GAP_PX: f64 = 3.0;
 const KEY_CORNER_RADIUS_PX: f64 = 2.5;
 
+/// How many keys each backlight zone covers, from the key lists the
+/// daemon's ripple effect uses. The zones are not equal quarters: zone 2
+/// is the widest and zone 4 is the numpad. Splitting the drawing evenly
+/// put the boundaries in the wrong place.
+const ZONE_KEY_COUNTS: [f64; ZONE_COUNT] = [24.0, 29.0, 25.0, 18.0];
+
 pub struct KeyboardPreview {
     pub root: gtk::Widget,
     drawing_area: gtk::DrawingArea,
@@ -79,11 +85,14 @@ fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u
 
     // Backlight glow: one radial gradient per zone, drawn under the keys so
     // it shines through the gaps between keycaps.
-    let zone_width = grid_width / ZONE_COUNT as f64;
+    let zone_bounds = zone_bounds(grid_left, grid_width);
     for (zone_index, zone_color) in colors.iter().enumerate() {
         let (red, green, blue) = color_to_rgb_f64(zone_color);
 
-        let center_x = grid_left + zone_width * (zone_index as f64 + 0.5);
+        let (zone_left, zone_right) = zone_bounds[zone_index];
+        let zone_width = zone_right - zone_left;
+
+        let center_x = zone_left + zone_width / 2.0;
         let center_y = grid_top + grid_height / 2.0;
         let glow_radius = zone_width * 0.85;
 
@@ -117,7 +126,7 @@ fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u
             let key_width = column_width * spanned_columns as f64 + KEY_GAP_PX * (spanned_columns as f64 - 1.0);
 
             let key_center_x = key_x + key_width / 2.0;
-            let zone_index = zone_index_for_x(key_center_x, grid_left, grid_width);
+            let zone_index = zone_index_for_x(key_center_x, &zone_bounds);
             let (red, green, blue) = color_to_rgb_f64(&colors[zone_index]);
 
             // Keycap surface: the zone color over a dark cap, so black
@@ -133,11 +142,34 @@ fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u
     }
 }
 
-fn zone_index_for_x(x: f64, grid_left: f64, grid_width: f64) -> usize {
-    let relative = (x - grid_left) / grid_width;
-    let scaled = relative * ZONE_COUNT as f64;
-    let index = scaled as usize;
-    index.min(ZONE_COUNT - 1)
+/// Left and right edge of each zone, weighted by how many keys it covers.
+fn zone_bounds(grid_left: f64, grid_width: f64) -> [(f64, f64); ZONE_COUNT] {
+    let mut total_keys = 0.0;
+    for key_count in ZONE_KEY_COUNTS {
+        total_keys += key_count;
+    }
+
+    let mut bounds: [(f64, f64); ZONE_COUNT] = [(0.0, 0.0); ZONE_COUNT];
+    let mut edge = grid_left;
+    for (zone_index, key_count) in ZONE_KEY_COUNTS.iter().enumerate() {
+        let zone_width = grid_width * key_count / total_keys;
+        bounds[zone_index] = (edge, edge + zone_width);
+        edge += zone_width;
+    }
+
+    // Absorb rounding into the last edge so the zones tile the grid exactly.
+    bounds[ZONE_COUNT - 1].1 = grid_left + grid_width;
+    bounds
+}
+
+fn zone_index_for_x(x: f64, bounds: &[(f64, f64); ZONE_COUNT]) -> usize {
+    for (zone_index, (_left, right)) in bounds.iter().enumerate() {
+        if x < *right {
+            return zone_index;
+        }
+    }
+
+    ZONE_COUNT - 1
 }
 
 fn color_to_rgb_f64(color: &[u8; 3]) -> (f64, f64, f64) {

@@ -4,11 +4,14 @@
 //! daemon, `update_view` syncs widgets from the model with explicit
 //! compares (which is also what stops signal echo loops).
 
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 use aurora_protocol::{
     effects::{Brightness, Direction, Effects, SwipeMode},
-    ipc::{DaemonState, KeyboardStatus, Request, SlotSelection},
+    ipc::{DaemonState, KeyboardStatus, Request, SlotSelection, SubsystemState},
     profile::{Lighting, SLOT_COUNT},
 };
 use relm4::{
@@ -26,13 +29,23 @@ use crate::{
 const WINDOW_DEFAULT_WIDTH: i32 = 640;
 const WINDOW_DEFAULT_HEIGHT: i32 = 720;
 
+/// How long a locally edited value keeps precedence over daemon snapshots.
+///
+/// Every edit is sent immediately and comes back in a broadcast, but a
+/// snapshot generated just before the edit landed would otherwise overwrite
+/// the control the user is still dragging. Outside this window the daemon
+/// is always the source of truth, which is what keeps the preview, the
+/// pickers and the slot rows from drifting apart.
+const LOCAL_EDIT_GRACE: Duration = Duration::from_millis(400);
+
 pub struct App {
     connected: bool,
     state: Option<DaemonState>,
-    /// Optimistic copy of the active slot's lighting; widget edits land
-    /// here first. Phase 3 removes this in favour of rendering the daemon
-    /// snapshot directly.
+    /// Edit buffer for the active slot's lighting. Adopted from every
+    /// daemon snapshot except while [`LOCAL_EDIT_GRACE`] is running.
     lighting: Lighting,
+    /// When the last local edit happened, if it was recent.
+    last_local_edit_at: Option<Instant>,
     ipc: IpcHandle,
 
     autostart_available: bool,
@@ -70,6 +83,8 @@ pub enum AppMsg {
     CleanWithBlackPicked { clean: bool },
     AmbientFpsPicked { fps: u8 },
     AmbientSaturationPicked { saturation: f32 },
+
+    SlotSelected { slot: SlotSelection },
 
     ProfileActivated { name: String },
     ProfileDeleted { name: String },
@@ -119,15 +134,17 @@ impl SimpleComponent for App {
 
     fn init(_init: Self::Init, root: Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
         // --- Connection worker -------------------------------------------
+        // input_sender().send rather than input(): the latter logs and
+        // discards the failure, so the worker could never tell that the
+        // window had closed and kept reconnecting into a dead runtime.
         let ipc_sender = sender.clone();
-        let ipc = ipc::spawn(move |update| {
-            ipc_sender.input(AppMsg::Ipc(update));
-        });
+        let ipc = ipc::spawn(move |update| ipc_sender.input_sender().send(AppMsg::Ipc(update)).is_ok());
 
         let model = App {
             connected: false,
             state: None,
             lighting: Lighting::default(),
+            last_local_edit_at: None,
             ipc,
             autostart_available: false,
             autostart_enabled: false,
@@ -388,6 +405,18 @@ impl SimpleComponent for App {
                 }
             }
 
+            AppMsg::SlotSelected { slot } => {
+                let Some(state) = &self.state else {
+                    return;
+                };
+                if state.active_slot == slot {
+                    return; // Echo from update_view, or a second click.
+                }
+                // No optimistic update: the daemon owns which slot is live,
+                // and its broadcast is what moves the rows.
+                self.ipc.send(Request::SelectSlot { slot });
+            }
+
             AppMsg::ProfileActivated { name } => {
                 self.ipc.send(Request::SwitchProfile { name });
             }
@@ -615,7 +644,12 @@ impl App {
                     self.keyboard_seen = true;
                 }
 
-                self.lighting = active_lighting(&state);
+                // The daemon wins unless the user is mid-edit, in which
+                // case a snapshot older than the edit would undo it.
+                if !self.editing_locally() {
+                    self.lighting = active_lighting(&state);
+                    self.last_local_edit_at = None;
+                }
                 self.state = Some(*state);
             }
             IpcUpdate::RequestFailed(message) => {
@@ -634,11 +668,20 @@ impl App {
     /// Send the local lighting to the daemon, targeting whichever slot is
     /// active; the resulting StateChanged event confirms it (and updates
     /// every other connected client).
-    fn push_lighting(&self) {
+    fn push_lighting(&mut self) {
+        self.last_local_edit_at = Some(Instant::now());
         self.ipc.send(Request::SetLighting {
             slot: None,
             lighting: self.lighting.clone(),
         });
+    }
+
+    /// True while a local edit still outranks incoming snapshots.
+    fn editing_locally(&self) -> bool {
+        match self.last_local_edit_at {
+            Some(edited_at) => edited_at.elapsed() < LOCAL_EDIT_GRACE,
+            None => false,
+        }
     }
 
     fn queue_toast(&self, text: &str) {
@@ -759,15 +802,33 @@ impl App {
             }
         }
 
-        // Slot caption. Phase 3 replaces this with a real slot control;
-        // until then it names the live slot.
-        let active_slot = match &self.state {
-            Some(state) => state.active_slot,
-            None => SlotSelection::First,
+        // --- Slots ---------------------------------------------------------
+        let Some(state) = &self.state else {
+            return;
         };
+        let active_slot = state.active_slot;
+
+        let mut swatch_colors: [[u8; 3]; SLOT_COUNT] = [[0; 3]; SLOT_COUNT];
+        let mut slot_subtitles: [String; SLOT_COUNT] = Default::default();
+        for (slot_index, slot_lighting) in state.current.slots.iter().enumerate() {
+            swatch_colors[slot_index] = representative_color(slot_lighting);
+            slot_subtitles[slot_index] = slot_lighting.effect.to_string();
+        }
+        page.set_slot_colors(swatch_colors);
+        page.set_slot_rows(active_slot, slot_subtitles);
+
+        // Say so when the key cannot drive the slots, rather than letting
+        // the row description imply it works.
+        let sync_note = match &state.slot_sync {
+            SubsystemState::Unavailable { reason } => Some(format!("Fn+Space is not available here ({reason}). Pick a slot below.")),
+            SubsystemState::Degraded { reason } => Some(format!("Fn+Space may be out of step ({reason}). Pick a slot below to resync.")),
+            _ => None,
+        };
+        page.set_slot_sync_note(sync_note.as_deref());
+
         let slot_text = match active_slot {
-            SlotSelection::Off => "Backlight off. Press Fn+Space to turn it back on.".to_string(),
-            lit => format!("Slot {lit} of {SLOT_COUNT}. Fn+Space switches slots."),
+            SlotSelection::Off => "Backlight off".to_string(),
+            lit => format!("Slot {lit} of {SLOT_COUNT}"),
         };
         if page.slot_label.text() != slot_text.as_str() {
             page.slot_label.set_text(&slot_text);
@@ -776,19 +837,59 @@ impl App {
             page.slot_label.set_visible(true);
         }
 
-        // Preview. While the backlight is off the physical keyboard is
-        // dark, so the preview shows that instead of the stored colors.
-        let backlight_off = active_slot == SlotSelection::Off;
-        let mut preview_colors: [[u8; 3]; 4] = [[0; 3]; 4];
-        if !backlight_off {
-            for (target, zone) in preview_colors.iter_mut().zip(self.lighting.rgb_zones.iter()) {
-                if zone.enabled {
-                    *target = zone.rgb;
-                }
-            }
-        }
+        // --- Preview ---------------------------------------------------------
+        // Shows what the keyboard is actually doing: darkness while off,
+        // and nothing zone-coloured for effects that ignore zone colours.
+        let preview_colors = match active_slot.index() {
+            None => [[0; 3]; 4],
+            Some(_) => preview_zone_colors(&self.lighting),
+        };
         page.preview.set_colors(preview_colors);
     }
+}
+
+/// One colour standing for a whole slot, for its list chip.
+///
+/// Effects that ignore the zone colours cannot be represented by them, so
+/// they get a neutral grey rather than a stale colour the keyboard is not
+/// showing.
+fn representative_color(lighting: &Lighting) -> [u8; 3] {
+    if !lighting.effect.takes_color_array() {
+        return [120, 120, 120];
+    }
+
+    let mut brightest: [u8; 3] = [0, 0, 0];
+    let mut brightest_sum: u32 = 0;
+    for zone in &lighting.rgb_zones {
+        if !zone.enabled {
+            continue;
+        }
+        let sum = u32::from(zone.rgb[0]) + u32::from(zone.rgb[1]) + u32::from(zone.rgb[2]);
+        if sum >= brightest_sum {
+            brightest_sum = sum;
+            brightest = zone.rgb;
+        }
+    }
+
+    brightest
+}
+
+/// Zone colours for the preview, or black for effects that do not use
+/// them. Showing the stored zone colours under a rainbow effect was the
+/// preview claiming something the keyboard was not doing.
+fn preview_zone_colors(lighting: &Lighting) -> [[u8; 3]; 4] {
+    let mut colors: [[u8; 3]; 4] = [[0; 3]; 4];
+    if !lighting.effect.takes_color_array() {
+        return colors;
+    }
+
+    for (target, zone) in colors.iter_mut().zip(lighting.rgb_zones.iter()) {
+        if zone.enabled {
+            *target = zone.rgb;
+        }
+    }
+
+    colors
 }
 
 /// The lighting the keyboard is showing: the active slot's, or darkness

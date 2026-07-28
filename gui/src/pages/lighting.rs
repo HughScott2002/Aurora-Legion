@@ -1,7 +1,11 @@
 //! The Lighting page: keyboard preview on top, effect + colors + options
 //! below — modeled on GNOME Settings' Appearance panel.
 
-use aurora_protocol::effects::Effects;
+use aurora_protocol::{
+    effects::Effects,
+    ipc::{SlotSelection, LIT_SLOTS},
+    profile::SLOT_COUNT,
+};
 use relm4::{
     adw::{self, prelude::*},
     gtk::{self, gdk},
@@ -17,9 +21,19 @@ use crate::{
 pub struct LightingPage {
     pub root: gtk::Widget,
     pub preview: KeyboardPreview,
-    /// Caption under the preview naming the active EC hardware slot
-    /// (Fn+Space); hidden on machines where the slot cannot be read.
+    /// Caption under the preview naming the active slot.
     pub slot_label: gtk::Label,
+
+    pub slots_group: adw::PreferencesGroup,
+    /// One row per lit slot, plus the off row. Activating a row selects it.
+    pub slot_rows: [adw::ActionRow; SLOT_COUNT],
+    pub off_row: adw::ActionRow,
+    /// Colour chips beside each slot row. Stock boxes carrying a CSS
+    /// background, restyled from [`LightingPage::set_slot_colors`]; the
+    /// keyboard preview stays the only place that draws.
+    slot_swatches: [gtk::Box; SLOT_COUNT],
+    swatch_css: gtk::CssProvider,
+    shown_swatch_colors: std::cell::Cell<[[u8; 3]; SLOT_COUNT]>,
 
     pub effect_row: adw::ComboRow,
 
@@ -49,12 +63,69 @@ pub fn effect_names() -> Vec<&'static str> {
     names
 }
 
+/// Width and height of a slot colour chip, in logical pixels. Big enough
+/// to read at a glance, small enough to sit inside a list row.
+const SWATCH_SIZE_PX: i32 = 24;
+
 pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
     content.set_margin_top(18);
     content.set_margin_bottom(24);
     content.set_margin_start(12);
     content.set_margin_end(12);
+
+    // --- Slots -----------------------------------------------------------
+    // First on the page because every control below edits the selected
+    // slot. Putting it lower would mean reading the page bottom-up to know
+    // what you are changing.
+    let slots_group = adw::PreferencesGroup::new();
+    slots_group.set_title("Slots");
+    slots_group.set_description(Some("Each profile holds one look per slot. Fn+Space cycles them."));
+
+    let swatch_css = gtk::CssProvider::new();
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(&display, &swatch_css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+
+    let mut slot_rows: Vec<adw::ActionRow> = Vec::with_capacity(SLOT_COUNT);
+    let mut slot_swatches: Vec<gtk::Box> = Vec::with_capacity(SLOT_COUNT);
+
+    for (slot_position, slot) in LIT_SLOTS.iter().enumerate() {
+        let row = adw::ActionRow::new();
+        row.set_title(&format!("Slot {}", slot_position + 1));
+        row.set_activatable(true);
+
+        let swatch = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        swatch.set_size_request(SWATCH_SIZE_PX, SWATCH_SIZE_PX);
+        swatch.set_valign(gtk::Align::Center);
+        swatch.add_css_class("aurora-swatch");
+        swatch.add_css_class(&format!("aurora-swatch-{}", slot_position + 1));
+        // Decorative: the row title and subtitle carry the same meaning.
+        swatch.set_accessible_role(gtk::AccessibleRole::Presentation);
+        row.add_suffix(&swatch);
+
+        let slot_sender = sender.clone();
+        let selected_slot = *slot;
+        row.connect_activated(move |_| {
+            slot_sender.input(AppMsg::SlotSelected { slot: selected_slot });
+        });
+
+        slots_group.add(&row);
+        slot_rows.push(row);
+        slot_swatches.push(swatch);
+    }
+
+    let off_row = adw::ActionRow::new();
+    off_row.set_title("Backlight Off");
+    off_row.set_subtitle("The fourth Fn+Space position");
+    off_row.set_activatable(true);
+    let off_sender = sender.clone();
+    off_row.connect_activated(move |_| {
+        off_sender.input(AppMsg::SlotSelected { slot: SlotSelection::Off });
+    });
+    slots_group.add(&off_row);
+
+    content.append(&slots_group);
 
     // --- Preview ---------------------------------------------------------
     // The preview and its slot caption sit in their own tighter box: the
@@ -248,10 +319,25 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         Err(_) => unreachable!("exactly four zone buttons are created above"),
     };
 
+    let slot_rows: [adw::ActionRow; SLOT_COUNT] = match slot_rows.try_into() {
+        Ok(rows) => rows,
+        Err(_) => unreachable!("one row per lit slot is created above"),
+    };
+    let slot_swatches: [gtk::Box; SLOT_COUNT] = match slot_swatches.try_into() {
+        Ok(swatches) => swatches,
+        Err(_) => unreachable!("one swatch per lit slot is created above"),
+    };
+
     LightingPage {
         root: scrolled.upcast(),
         preview,
         slot_label,
+        slots_group,
+        slot_rows,
+        off_row,
+        slot_swatches,
+        swatch_css,
+        shown_swatch_colors: std::cell::Cell::new([[0; 3]; SLOT_COUNT]),
         effect_row,
         zone_buttons,
         colors_group,
@@ -264,6 +350,73 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         swipe_group,
         swipe_mode_row,
         clean_row,
+    }
+}
+
+impl LightingPage {
+    /// Repaint the slot chips. One provider carries all three rules and is
+    /// reloaded only when a colour actually changes, so this is not doing
+    /// CSS work on every state broadcast.
+    pub fn set_slot_colors(&self, colors: [[u8; 3]; SLOT_COUNT]) {
+        if self.shown_swatch_colors.get() == colors {
+            return;
+        }
+        self.shown_swatch_colors.set(colors);
+
+        let mut css = String::from(".aurora-swatch { border-radius: 6px; border: 1px solid alpha(currentColor, 0.2); }\n");
+        for (slot_position, color) in colors.iter().enumerate() {
+            let [red, green, blue] = *color;
+            css.push_str(&format!(
+                ".aurora-swatch-{} {{ background-color: rgb({red}, {green}, {blue}); }}\n",
+                slot_position + 1
+            ));
+        }
+
+        self.swatch_css.load_from_string(&css);
+    }
+
+    /// Mark which row is live and describe what each slot holds.
+    pub fn set_slot_rows(&self, active: SlotSelection, subtitles: [String; SLOT_COUNT]) {
+        for (slot_position, row) in self.slot_rows.iter().enumerate() {
+            let is_active = active.index() == Some(slot_position);
+            let subtitle = if is_active {
+                format!("{} (live)", subtitles[slot_position])
+            } else {
+                subtitles[slot_position].clone()
+            };
+            if row.subtitle().as_deref() != Some(subtitle.as_str()) {
+                row.set_subtitle(&subtitle);
+            }
+
+            let has_marker = row.has_css_class("aurora-slot-active");
+            if is_active && !has_marker {
+                row.add_css_class("aurora-slot-active");
+            }
+            if !is_active && has_marker {
+                row.remove_css_class("aurora-slot-active");
+            }
+        }
+
+        let off_is_active = active == SlotSelection::Off;
+        let off_subtitle = if off_is_active {
+            "The fourth Fn+Space position (live)"
+        } else {
+            "The fourth Fn+Space position"
+        };
+        if self.off_row.subtitle().as_deref() != Some(off_subtitle) {
+            self.off_row.set_subtitle(off_subtitle);
+        }
+    }
+
+    /// Describe why slots cannot be cycled with the key, when they cannot.
+    pub fn set_slot_sync_note(&self, note: Option<&str>) {
+        let description = match note {
+            Some(note) => note.to_string(),
+            None => "Each profile holds one look per slot. Fn+Space cycles them.".to_string(),
+        };
+        if self.slots_group.description().as_deref() != Some(description.as_str()) {
+            self.slots_group.set_description(Some(&description));
+        }
     }
 }
 

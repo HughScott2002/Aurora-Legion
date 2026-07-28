@@ -50,11 +50,16 @@ impl IpcHandle {
     }
 }
 
-/// Spawn the connection worker. `deliver` forwards updates into the relm4
-/// component (it is a cloned `ComponentSender::input` under the hood).
+/// Spawn the connection worker.
+///
+/// `deliver` forwards an update into the relm4 component and returns
+/// whether it arrived. It returns false once the component is gone, which
+/// is the worker's only way to learn the window closed: relm4's
+/// `ComponentSender::input` swallows that error, so a worker built on it
+/// keeps reconnecting and delivering into a dead runtime forever.
 pub fn spawn<F>(deliver: F) -> IpcHandle
 where
-    F: Fn(IpcUpdate) + Send + Clone + 'static,
+    F: Fn(IpcUpdate) -> bool + Send + Clone + 'static,
 {
     let (request_tx, request_rx) = crossbeam_channel::bounded::<Request>(WRITE_QUEUE_CAPACITY);
 
@@ -67,7 +72,7 @@ where
 
 fn connection_loop<F>(request_rx: &Receiver<Request>, deliver: &F)
 where
-    F: Fn(IpcUpdate) + Send + Clone + 'static,
+    F: Fn(IpcUpdate) -> bool + Send + Clone + 'static,
 {
     let mut attempt_count: usize = 0;
 
@@ -87,15 +92,22 @@ where
         };
 
         attempt_count = 0;
-        deliver(IpcUpdate::Connected);
+        if !deliver(IpcUpdate::Connected) {
+            return;
+        }
 
         let outcome = serve_connection(stream, request_rx, deliver);
 
-        deliver(IpcUpdate::Disconnected);
-
-        if outcome == SessionOutcome::Incompatible {
-            // Reconnecting cannot change the daemon's protocol version.
+        if !deliver(IpcUpdate::Disconnected) {
             return;
+        }
+
+        match outcome {
+            // Reconnecting cannot change the daemon's protocol version.
+            SessionOutcome::Incompatible => return,
+            // The window is gone; nothing left to talk to.
+            SessionOutcome::ClientGone => return,
+            SessionOutcome::Closed => {}
         }
     }
 }
@@ -106,6 +118,8 @@ where
 enum SessionOutcome {
     Closed,
     Incompatible,
+    /// The component is gone, so there is nobody to deliver to.
+    ClientGone,
 }
 
 /// Runs until the connection dies. Sends Subscribe + GetState first, then
@@ -113,7 +127,7 @@ enum SessionOutcome {
 /// server lines.
 fn serve_connection<F>(stream: UnixStream, request_rx: &Receiver<Request>, deliver: &F) -> SessionOutcome
 where
-    F: Fn(IpcUpdate) + Send + Clone + 'static,
+    F: Fn(IpcUpdate) -> bool + Send + Clone + 'static,
 {
     let read_stream = match stream.try_clone() {
         Ok(clone) => clone,
@@ -195,7 +209,7 @@ fn write_request(writer: &mut UnixStream, next_id: &mut u64, request: &Request) 
 
 fn reader_loop<F>(stream: UnixStream, deliver: &F) -> SessionOutcome
 where
-    F: Fn(IpcUpdate),
+    F: Fn(IpcUpdate) -> bool,
 {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -234,10 +248,16 @@ where
         match message {
             ServerMessage::Event(envelope) => {
                 let Event::StateChanged { state } = envelope.event;
-                deliver(IpcUpdate::State(Box::new(state)));
+                if !deliver(IpcUpdate::State(Box::new(state))) {
+                    return SessionOutcome::ClientGone;
+                }
             }
             ServerMessage::Response(envelope) => match envelope.resp {
-                Response::State { state } => deliver(IpcUpdate::State(Box::new(state))),
+                Response::State { state } => {
+                    if !deliver(IpcUpdate::State(Box::new(state))) {
+                        return SessionOutcome::ClientGone;
+                    }
+                }
                 Response::Hello { protocol_version, daemon_version } => {
                     // A mismatch is terminal. v2 moved lighting into
                     // Profile::slots, so a mismatched peer would parse
@@ -252,7 +272,9 @@ where
                     }
                 }
                 Response::Error { kind, message } => {
-                    deliver(IpcUpdate::RequestFailed(format!("{kind:?}: {message}")));
+                    if !deliver(IpcUpdate::RequestFailed(format!("{kind:?}: {message}"))) {
+                        return SessionOutcome::ClientGone;
+                    }
                 }
                 Response::Ok => {
                     // Fire-and-forget acknowledgement; state events carry
