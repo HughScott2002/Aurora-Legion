@@ -20,7 +20,12 @@
 //! multicast group, and block on `recv`. Parsing is kept in pure functions
 //! over byte slices so it is unit-testable without a socket.
 
-use std::{io, mem, os::fd::RawFd, thread, time::Duration};
+use std::{
+    io, mem,
+    os::fd::RawFd,
+    thread,
+    time::{Duration, Instant},
+};
 
 use aurora_protocol::ipc::{Subsystem, SubsystemState};
 use crossbeam_channel::Sender;
@@ -87,6 +92,11 @@ const REOPEN_BACKOFF: [Duration; 3] = [Duration::from_millis(500), Duration::fro
 /// spin forever.
 const MAX_REOPEN_ATTEMPTS: u32 = 5;
 
+/// A listening session that lasts this long has proved the socket works, so
+/// its eventual failure starts a fresh reopen budget. Anything shorter keeps
+/// counting against the current one.
+const MIN_HEALTHY_SESSION: Duration = Duration::from_secs(60);
+
 pub fn spawn(command_tx: Sender<Command>) {
     thread::spawn(move || {
         run_listener(&command_tx);
@@ -126,11 +136,21 @@ fn run_listener(command_tx: &Sender<Command>) {
         };
 
         report(command_tx, SubsystemState::Active);
-        reopen_attempt = 0;
 
+        let session_start = Instant::now();
         match listen(&socket, family_id, command_tx, trace_enabled) {
             ListenOutcome::CoreGone => return,
             ListenOutcome::SocketFailed(message) => {
+                // Clear the budget only after a session that ran long enough
+                // to prove the socket works. Clearing it on every successful
+                // connect instead puts the reset after each failure, so the
+                // attempt cap can never be reached and a permanently broken
+                // socket reopens forever.
+                let session = session_start.elapsed();
+                if session >= MIN_HEALTHY_SESSION {
+                    reopen_attempt = 0;
+                }
+
                 reopen_attempt += 1;
                 if reopen_attempt > MAX_REOPEN_ATTEMPTS {
                     let reason = format!("netlink socket kept failing ({message}) after {MAX_REOPEN_ATTEMPTS} attempts");

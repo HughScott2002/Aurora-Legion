@@ -104,6 +104,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   flag set and came back visible under an effect that does not use it.
 - The ambient and swipe option groups were built visible and hidden only
   once daemon state arrived, so both flashed on screen at every startup.
+- The bound on reopening the ACPI event socket could never be reached.
+  The attempt counter was cleared on every successful connect, which is
+  the step right after every failure, so a socket that opened and then
+  immediately failed retried forever at the shortest backoff instead of
+  giving up. The budget now clears only after a session that lasted long
+  enough to prove the socket works.
 - The app's connection worker kept reconnecting and delivering into a
   dead runtime after the window closed, because relm4's input sender
   reports send failures only to the log. It now stops when the component
