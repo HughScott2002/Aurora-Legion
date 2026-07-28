@@ -592,7 +592,15 @@ impl SimpleComponent for App {
         widgets.custom.sync(&state.custom_effects, state.custom_effect_playing.as_deref(), &sender);
 
         // --- Daemon page ----------------------------------------------------
-        let status_text = format!("Running (v{})", state.version);
+        // Same stale-daemon case the CLI reports: an upgrade replaces the
+        // binaries without restarting a running daemon, so the app can be
+        // newer than the daemon it is talking to.
+        let own_version = env!("CARGO_PKG_VERSION");
+        let status_text = if state.version == own_version {
+            format!("Running (v{})", state.version)
+        } else {
+            format!("Running (v{}), older than this app (v{own_version}). Restart it to upgrade.", state.version)
+        };
         if widgets.settings.status_row.subtitle().as_deref() != Some(status_text.as_str()) {
             widgets.settings.status_row.set_subtitle(&status_text);
         }

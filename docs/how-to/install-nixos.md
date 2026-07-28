@@ -80,6 +80,32 @@ $ home-manager switch --flake .#USERNAME@HOSTNAME
 
 Replace the flake output names with yours.
 
+## After an upgrade, restart the daemon
+
+Rebuilding installs the new binaries but does not restart a daemon that is
+already running. NixOS reloads user units on activation; it does not
+restart them, because that would interrupt a live session. The old daemon
+keeps serving until you restart it or log out, so `aurora --version` and
+`aurora status` can disagree:
+
+```console
+$ aurora --version
+aurora 0.24.1
+
+$ aurora status
+daemon:   running (v0.24.0)
+          this CLI is v0.24.1, so the running daemon predates the installed build
+          restart it with: systemctl --user restart aurora
+```
+
+```console
+$ systemctl --user restart aurora
+```
+
+This matters most across a protocol change. The app and CLI stop rather
+than misread state from a daemon speaking a different protocol version, so
+an un-restarted daemon looks like a broken install until it is restarted.
+
 ## Verify
 
 Either way:

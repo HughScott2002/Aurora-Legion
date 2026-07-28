@@ -181,12 +181,23 @@ fn run_status() -> ExitCode {
     };
 
     println!("daemon:   running (v{})", state.version);
+
+    // A package upgrade replaces the binaries but does not restart a daemon
+    // that is already running, so the old one keeps serving until the user
+    // restarts it or logs out. Without this the mismatch is invisible: the
+    // CLI reports the daemon's version and says nothing about its own.
+    let own_version = env!("CARGO_PKG_VERSION");
+    if state.version != own_version {
+        println!("          this CLI is v{own_version}, so the running daemon predates the installed build");
+        println!("          restart it with: systemctl --user restart aurora");
+    }
+
     match state.keyboard {
         aurora_protocol::ipc::KeyboardStatus::Connected => println!("keyboard: connected"),
         aurora_protocol::ipc::KeyboardStatus::Searching => println!("keyboard: searching..."),
         aurora_protocol::ipc::KeyboardStatus::PermissionDenied { message } => {
             println!("keyboard: permission denied ({message})");
-            println!("          install the udev rule: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access");
+            println!("          install the udev rule: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/how-to/install-linux.md#grant-keyboard-access");
         }
         aurora_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
     }
