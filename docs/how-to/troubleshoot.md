@@ -92,6 +92,36 @@ This is a real loosening: every member of that group can then reach the
 controller, rather than whoever is physically logged in. Prefer the
 re-login unless you have a reason not to.
 
+### Confirming access really comes from the udev rule
+
+Two things routinely make a broken rule look like a working one.
+
+Group ownership can mask the ACL. The node's default mode is 0664
+(systemd's `50-udev-default.rules`), so if its group is one you belong
+to, `group::rw-` grants access whether or not the `uaccess` ACL landed.
+Point the group at root and the ACL becomes the only thing left:
+
+```console
+$ sudo chgrp root /dev/bus/usb/BBB/DDD
+$ getfacl -p /dev/bus/usb/BBB/DDD
+```
+
+Change the group, not the mode. `chmod` recalculates the ACL mask and
+can disable the entry you are trying to test.
+
+An already-open descriptor survives a permission change. The daemon
+holds the device open, and revoking access does not close it, so
+lighting keeps working until the daemon reopens the device. Restart it
+before believing a result:
+
+```console
+$ systemctl --user restart aurora
+$ aurora status
+```
+
+`keyboard: connected` after a restart, with the group pointed away from
+you, means the ACL is doing the work.
+
 ## Another process owns the keyboard
 
 The HID interface allows one owner. Look for competing processes:
