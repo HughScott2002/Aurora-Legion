@@ -152,6 +152,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skipping slots, going dark, or falling back to firmware RGB.
 - Hardware profiles now reach the controller in one complete feature
   report, avoiding stale intermediate colors and effects.
+- `services.aurora.enable` in the NixOS module: a full install without
+  home-manager: package, udev rules, and the daemon as a systemd user
+  service bound to the graphical session (#11). `hardware.aurora.enable`
+  stays as the udev-only knob for home-manager setups.
 
 ## [0.22.0] - 2026-07-21
 

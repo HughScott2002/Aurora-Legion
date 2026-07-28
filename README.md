@@ -32,7 +32,36 @@ Aurora supports controllers from 2020 through 2024. See
 
 ## Start
 
-With Nix:
+On NixOS, add the flake input and pick one of the two setups:
+
+```nix
+# flake inputs
+aurora.url = "github:HughScott2002/Aurora-Legion";
+```
+
+**Without home-manager.** One option installs the package, the udev
+rules, and the daemon as a systemd user service:
+
+```nix
+# nixos configuration
+imports = [ aurora.nixosModules.default ];
+services.aurora.enable = true;
+```
+
+**With home-manager.** Run the daemon per-user; the NixOS side only
+grants keyboard access:
+
+```nix
+# home-manager: run the daemon at login
+imports = [ aurora.homeModules.default ];
+services.aurora.enable = true;
+
+# nixos: let your user open the keyboard without root
+imports = [ aurora.nixosModules.default ];
+hardware.aurora.enable = true;
+```
+
+To try it without installing, start the daemon and then the GUI:
 
 ```console
 $ nix run github:HughScott2002/Aurora-Legion#daemon &
