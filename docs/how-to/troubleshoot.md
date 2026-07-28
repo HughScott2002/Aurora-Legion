@@ -6,7 +6,22 @@ Start with:
 $ aurora status
 ```
 
-Then use the section that matches its output.
+Then use the section that matches its output. `status` names any
+optional subsystem that is not working, with the reason: Fn+Space
+detection, the profile hotkey, and screen capture each report for
+themselves rather than failing silently.
+
+For a stubborn fault, restart the daemon with tracing on:
+
+```console
+$ systemctl --user stop aurora
+$ AURORA_TRACE=1 aurora daemon
+```
+
+Tracing logs every ACPI event with its match verdict, every write to the
+controller with its payload and result, and the slot counter read at
+acquisition. Leave it off the rest of the time; it exists for a specific
+failure, not for normal running.
 
 ## Daemon not running
 
@@ -89,6 +104,10 @@ If the GUI closes when the daemon disconnects, restart the daemon and
 open the GUI again. Graceful disconnect handling remains tracked in
 [issue #14](https://github.com/HughScott2002/Aurora-Legion/issues/14).
 
+A GUI that reports a version mismatch is talking to a daemon from a
+different release. It stops rather than staying connected and misreading
+state. Restart the daemon so both sides come from the same install.
+
 ## Fn+Space shows firmware RGB or darkness
 
 Aurora applies only the last slot after Fn+Space input has been quiet
@@ -106,10 +125,10 @@ One physical tap should produce one slot selection. If the final state
 stays dark or shows firmware RGB, restart the daemon to read the
 initial EC slot again, then retry.
 
-The GUI preview and color pickers may lag behind a slot broadcast. The
-keyboard and `aurora status` are the reliable state until
-[issue #14](https://github.com/HughScott2002/Aurora-Legion/issues/14)
-is resolved.
+If Fn+Space is not detected at all, `aurora status` says so with the
+reason, and the app repeats it under the slot buttons. Select slots with
+the buttons or `aurora slot` in the meantime; everything except the key
+itself keeps working.
 
 ## Controller state survives reboot
 

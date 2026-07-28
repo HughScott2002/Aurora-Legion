@@ -22,8 +22,8 @@ and a working Fn+Space cycle.
   build Aurora and run its checks.
 - [Troubleshoot Aurora](how-to/troubleshoot.md): diagnose daemon,
   permission, GUI and Fn+Space failures.
-- [Use Fn+Space slots](how-to/use-fn-space-slots.md): inspect and change
-  Aurora's three remembered lighting slots.
+- [Use Fn+Space slots](how-to/use-fn-space-slots.md): select and edit
+  the three lighting slots every profile holds.
 - [Install with an AI assistant](install-with-ai.md): give an agent a
   bounded, auditable installation procedure.
 
@@ -35,6 +35,8 @@ and a working Fn+Space cycle.
   rules and logs.
 - [Measurements](measurements.md): method and raw performance results.
 - [Code style](style-guide.md): Rust, daemon and GTK rules.
+- [Interface style](ui-style-guide.md): hierarchy, spacing and what
+  earns a place on screen.
 - [Contributing](../CONTRIBUTING.md): commits, checks and releases.
 
 ## Explanation
@@ -50,3 +52,6 @@ and a working Fn+Space cycle.
 
 - [ITE 8295 hardware profiles](research/ite8295-hardware-profiles.md):
   sources, experiments and remaining unknowns.
+- [Mature daemon and native GUI references](research/mature-daemon-native-gui-references.md):
+  the projects Aurora's architecture was checked against, and what not
+  to copy from them.

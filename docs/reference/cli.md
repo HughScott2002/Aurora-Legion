@@ -8,10 +8,11 @@
 | Command | Purpose |
 | --- | --- |
 | `aurora daemon` | Run the daemon in the foreground. |
-| `aurora set` | Build and apply a profile from command-line options. |
+| `aurora set` | Build and apply lighting from command-line options. |
 | `aurora list` | List the 13 built-in effects. |
 | `aurora status` | Show daemon, keyboard, profile and Fn+Space slot state. |
 | `aurora cycle-profile` | Apply the next profile saved through the GUI. |
+| `aurora slot` | Show or change the active Fn+Space slot. |
 | `aurora load-profile` | Load and apply a profile JSON file. |
 | `aurora custom-effect` | Load and play a custom-effect JSON file. |
 | `aurora stop` | Stop a custom effect and restore the current profile. |
@@ -32,7 +33,12 @@ aurora set --effect <EFFECT> [OPTIONS]
 | `-b`, `--brightness` | `Low` or `High` | `Low` |
 | `-s`, `--speed` | 1 to 4 for hardware effects, 1 to 10 for software effects | 1 |
 | `-d`, `--direction` | `Left` or `Right` | Effect default |
+| `--slot` | `1`, `2` or `3`: the slot to write | The active slot |
 | `--save` | Path for a profile JSON file | No file |
+
+`--slot` writes one slot without selecting it, so the keyboard keeps
+showing whatever slot is live. Omit it to edit the slot in front of
+you.
 
 Color bytes follow the keyboard from left to right:
 
@@ -42,7 +48,29 @@ R1,G1,B1,R2,G2,B2,R3,G3,B3,R4,G4,B4
 
 If no daemon runs, `set` and `load-profile` can apply the four hardware
 effects directly. Software effects need the daemon because a process
-must keep writing frames.
+must keep writing frames. `--slot` needs a daemon: without one there is
+no stored profile to write a slot into.
+
+## `slot`
+
+```text
+aurora slot [SLOT]
+```
+
+`SLOT` is `1`, `2`, `3`, or `off`. Omit it to print the active slot.
+
+```console
+$ aurora slot
+slot 1 of 3
+
+$ aurora slot 2
+slot 2 selected
+```
+
+Selecting a slot applies it immediately, exactly as pressing Fn+Space
+onto it would. Aurora moves its own slot number; the hardware exposes
+no command to move the controller's counter. See
+[Use Fn+Space slots](../how-to/use-fn-space-slots.md).
 
 ## Effects
 
@@ -92,22 +120,26 @@ Set four zone colors:
 ```console
 $ aurora set -e Static \
     -c 255,0,0,0,255,0,0,0,255,255,255,255
-profile applied
+lighting applied
 ```
 
 Run a wave from right to left:
 
 ```console
 $ aurora set -e Wave -s 3 -d Right
-profile applied
+lighting applied
 ```
 
 Inspect the daemon:
 
 ```console
 $ aurora status
-daemon:   running (v0.23.0)
+daemon:   running (v0.24.0)
 keyboard: connected
-profile:  (unsaved) (Static effect)
-hw slot:  1 of 3
+profile:  (unsaved)
+slot:     1 of 3 (Static effect)
+saved:    2 profiles (gaming, dim)
 ```
+
+`status` also prints a line per optional subsystem that is not working,
+with the reason. Nothing is printed for a subsystem that works.
