@@ -139,11 +139,7 @@ processes that have to stay alive for the lights to stay on. See the
 | Binaries on disk | 26.6 MB | 8.7 MB daemon and 2.7 MB GUI | ✅ 2.3× smaller combined |
 | GUI while open | 92.5 MiB, always | 85.2 MiB, until you close it | ✅ lighter and transient |
 
-Measured 2026-07-27. The 0.21.0 round is not comparable and was
-replaced: both projects gained about 10 MiB of PSS on this machine
-between the two dates without either changing its own toolkit, because
-the system's GTK and libadwaita moved underneath them. Refreshing only
-Aurora's column would have claimed a ratio it did not earn.
+Measured 2026-07-27. 
 
 ## How it works
 
