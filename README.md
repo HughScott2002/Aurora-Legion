@@ -22,10 +22,10 @@
 
 https://github.com/user-attachments/assets/104b2c9e-340e-448c-b0f4-6f60c13d4f3a
 
-<div align="center">
+<!-- <div align="center"> -->
   <!-- <img src="docs/screenshot.png" alt="Aurora GTK4 interface" width="560"/> -->
-  <img width="563" height="633" alt="Aurora GTK4 interface" src="https://github.com/user-attachments/assets/c4cd4b50-23cb-499e-a308-e242b8be4fe2" />
-</div>
+  <!-- <img width="563" height="633" alt="Aurora GTK4 interface" src="https://github.com/user-attachments/assets/c4cd4b50-23cb-499e-a308-e242b8be4fe2" /> -->
+<!-- </div> -->
 
 
 
