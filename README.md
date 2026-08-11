@@ -19,13 +19,15 @@
 
 </div>
 
+
+https://github.com/user-attachments/assets/104b2c9e-340e-448c-b0f4-6f60c13d4f3a
+
 <div align="center">
   <!-- <img src="docs/screenshot.png" alt="Aurora GTK4 interface" width="560"/> -->
   <img width="563" height="633" alt="Aurora GTK4 interface" src="https://github.com/user-attachments/assets/c4cd4b50-23cb-499e-a308-e242b8be4fe2" />
 </div>
 
 
-https://github.com/user-attachments/assets/0420069d-d2f2-4af1-892b-27634a02baf6
 
 Aurora controls 4-zone RGB keyboards in select Lenovo Legion, IdeaPad
 and LOQ laptops. A small daemon owns the lighting. The native GTK app
