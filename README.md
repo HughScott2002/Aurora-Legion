@@ -21,18 +21,31 @@
 
 https://github.com/user-attachments/assets/104b2c9e-340e-448c-b0f4-6f60c13d4f3a
 
-Aurora gives Legion users on Linux a native app to control every
-lighting slot and choose from a wider range of effects. Your lighting
-stays alive after you close the app, using fewer resources in the
-background.
+<p align="center">
+  Aurora gives Legion users on Linux a native app to control every lighting slot
+  and choose from a wider range of effects.<br />
+  Your lighting stays alive after you close the app, using fewer resources in the background.
+</p>
 
-Aurora supports select 4-zone RGB keyboards in Lenovo Legion, IdeaPad
-and LOQ laptops from 2020 through 2024. Check
-[`driver/src/lib.rs`](driver/src/lib.rs) for exact USB IDs.
+<p align="center">
+  <img src="https://img.shields.io/badge/3-custom_Fn%2BSpace_slots-ff2740?style=flat-square" alt="Three custom Fn+Space slots" />
+  <img src="https://img.shields.io/badge/effects-keep_running-3584e4?style=flat-square" alt="Effects keep running" />
+  <img src="https://img.shields.io/badge/memory-about_1%2F8_in_background-e01b96?style=flat-square" alt="About one-eighth the background memory" />
+</p>
 
-Aurora would not exist without
-[L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB), whose
-hardware research, driver and effects laid the foundation.
+<p align="center">
+  Supports select 4-zone RGB keyboards in Lenovo Legion, IdeaPad and LOQ laptops
+  from 2020 through 2024.
+  <a href="driver/src/lib.rs">Check the exact USB IDs.</a>
+</p>
+
+<p align="center">
+  <em>Aurora would not exist without
+  <a href="https://github.com/4JX/L5P-Keyboard-RGB">L5P-Keyboard-RGB</a>, whose
+  hardware research, driver and effects laid the foundation.</em>
+</p>
+
+<br />
 
 ## Why Aurora
 
@@ -40,13 +53,30 @@ On Linux, Legion lighting can mean limited slots, an app that has to
 stay open, or firmware colours returning when you press Fn+Space.
 Aurora fixes those rough edges.
 
-- **All three slots are yours.** Each profile saves three different
-  looks that you can cycle from the keyboard or choose in the app.
-- **Close the app when you are done.** Your profile and animated effects
-  keep running in the background.
-- **Small where it matters.** With static lighting, Aurora's daemon used
-  about one-eighth the memory of L5P-Keyboard-RGB's resident app in
-  same-day tests.
+### Three slots. Three looks.
+
+Each profile saves a different look for all three Fn+Space slots. Cycle
+them from the keyboard or choose one in the app.
+
+<br />
+
+### Close the app. Keep the lighting.
+
+Your profile and animated effects keep running after the window closes.
+
+<br />
+
+### Small in the background.
+
+With static lighting, Aurora's daemon used about one-eighth the memory
+of L5P-Keyboard-RGB's resident app in same-day tests.
+
+<br />
+
+<details>
+<summary><strong>See the side-by-side comparison</strong></summary>
+
+<br />
 
 | What matters         | L5P-Keyboard-RGB 0.20.8      | Aurora                              |
 | -------------------- | ---------------------------- | ----------------------------------- |
@@ -57,18 +87,33 @@ Aurora fixes those rough edges.
 | Interface            | egui                         | Native GTK4 and libadwaita          |
 | Static memory        | 92.5 MiB                     | 11.5 MiB                            |
 
+</details>
+
+---
+
 ## Install Aurora
 
-> **Before you install:** Aurora is open source and provided without
-> warranty. Check that your device is supported, inspect the code if you
-> wish, and use it at your own risk.
+> [!CAUTION]
+> Aurora is open source and provided without warranty. Check that your
+> device is supported, inspect the code if you wish, and use it at your
+> own risk.
 
 Choose the path that matches your system:
 
-- **NixOS:** [install with the NixOS or Home Manager module](docs/how-to/install-nixos.md).
-- **Other Linux:** [use the AppImage or prebuilt tarball](docs/how-to/install-linux.md).
-- **From source:** [build and install Aurora yourself](docs/how-to/build-from-source.md).
-- **Coding agent:** give it this prompt:
+<p align="center">
+  <a href="docs/how-to/install-nixos.md"><img src="https://img.shields.io/badge/NixOS-install-5277C3?style=for-the-badge&amp;logo=nixos&amp;logoColor=white" alt="Install on NixOS" /></a>
+  <a href="docs/how-to/install-linux.md"><img src="https://img.shields.io/badge/Other_Linux-AppImage_%2F_tarball-ff2740?style=for-the-badge&amp;logo=linux&amp;logoColor=white" alt="Install an AppImage or tarball on other Linux distributions" /></a>
+  <br />
+  <a href="docs/how-to/build-from-source.md"><img src="https://img.shields.io/badge/Source-build-3584e4?style=for-the-badge&amp;logo=rust&amp;logoColor=white" alt="Build Aurora from source" /></a>
+  <a href="docs/install-with-ai.md"><img src="https://img.shields.io/badge/Coding_agent-guide-e01b96?style=for-the-badge" alt="Install with a coding agent" /></a>
+</p>
+
+<br />
+
+<details>
+<summary><strong>Copy the coding-agent prompt</strong></summary>
+
+<br />
 
 ```text
 Install Aurora on this computer by following
@@ -78,12 +123,16 @@ the daemon and keyboard connection, then tell me what changed and how to
 uninstall it.
 ```
 
-Want to test Aurora first? The [quick start](docs/quick-start.md) takes
-you from launch to a visible profile without installing it.
+</details>
+
+---
 
 ## For the curious
 
-### Measurements
+<details>
+<summary><strong>Performance measurements</strong></summary>
+
+<br />
 
 Both projects were built and measured on the same machine on the same
 day through the same Nix pipeline. The resident comparison uses
@@ -102,7 +151,14 @@ processes that must stay alive for animated lighting.
 Measured 2026-07-27. Read the [method and raw data](docs/measurements.md)
 for the full context.
 
-### How it works
+</details>
+
+<br />
+
+<details>
+<summary><strong>How Aurora works</strong></summary>
+
+<br />
 
 ```mermaid
 graph LR
@@ -119,6 +175,10 @@ Read [Architecture](docs/explanation/architecture.md) for the design or
 [IPC protocol](docs/protocol.md) to build another client. The deeper
 Fn+Space details live in [Fn+Space synchronization](docs/explanation/fn-space-sync.md)
 and the [hardware research](docs/research/ite8295-hardware-profiles.md).
+
+</details>
+
+---
 
 ## Community
 
