@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Keep Lenovo keyboard effects running after the window closes.**
+**Linux Native Lenovo keyboard RGB. Tiny runtime more effects.**
 
 <p>
   <a href="docs/quick-start.md"><img src="https://img.shields.io/badge/-Quick_start-ff2740?style=for-the-badge" alt="Quick start" /></a>&nbsp;
