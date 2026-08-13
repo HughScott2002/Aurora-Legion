@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Keep Lenovo keyboard effects running after the window closes.**
+**Linux Native Lenovo keyboard RGB. Tiny runtime more effects.**
 
 <p>
   <a href="docs/quick-start.md"><img src="https://img.shields.io/badge/-Quick_start-ff2740?style=for-the-badge" alt="Quick start" /></a>&nbsp;
@@ -19,9 +19,13 @@
 
 </div>
 
-<div align="center">
-  <img src="docs/aurora-lenovo-legion-rgb-keyboard-linux-app.png" alt="Aurora on Linux showing 4-zone RGB keyboard lighting for a Lenovo Legion laptop, with the static effect and red, green, blue and magenta zones" width="400"/>
-</div>
+https://github.com/user-attachments/assets/104b2c9e-340e-448c-b0f4-6f60c13d4f3a
+
+<!-- <div align="center"> -->
+  <!-- <img src="docs/screenshot.png" alt="Aurora GTK4 interface" width="560"/> -->
+  <!-- <img width="563" height="633" alt="Aurora GTK4 interface" src="https://github.com/user-attachments/assets/c4cd4b50-23cb-499e-a308-e242b8be4fe2" /> -->
+<!-- </div> -->
+
 
 Aurora controls 4-zone RGB keyboards in select Lenovo Legion, IdeaPad
 and LOQ laptops. A small daemon owns the lighting. The native GTK app
@@ -139,11 +143,7 @@ processes that have to stay alive for the lights to stay on. See the
 | Binaries on disk | 26.6 MB | 8.7 MB daemon and 2.7 MB GUI | ✅ 2.3× smaller combined |
 | GUI while open | 92.5 MiB, always | 85.2 MiB, until you close it | ✅ lighter and transient |
 
-Measured 2026-07-27. The 0.21.0 round is not comparable and was
-replaced: both projects gained about 10 MiB of PSS on this machine
-between the two dates without either changing its own toolkit, because
-the system's GTK and libadwaita moved underneath them. Refreshing only
-Aurora's column would have claimed a ratio it did not earn.
+Measured 2026-07-27.
 
 ## How it works
 
