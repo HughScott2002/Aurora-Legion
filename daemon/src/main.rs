@@ -2,7 +2,6 @@ mod cli;
 mod client;
 mod core;
 mod engine;
-mod hotkey;
 mod keyboard;
 mod server;
 mod settings;
@@ -13,8 +12,8 @@ use std::sync::{atomic::AtomicBool, Arc};
 use clap::{Parser, Subcommand};
 use aurora_protocol::ipc::socket_path;
 
-/// Commands from every source (IPC clients, hotkey) funnel into the core
-/// through one bounded queue.
+/// Commands from every source (IPC clients, signals, Fn+Space) funnel
+/// into the core through one bounded queue.
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 
 #[derive(Parser)]
@@ -85,7 +84,6 @@ fn run_daemon() {
     let (command_tx, command_rx) = crossbeam_channel::bounded(COMMAND_QUEUE_CAPACITY);
 
     spawn_signal_listener(command_tx.clone());
-    hotkey::spawn(command_tx.clone());
     slot_watch::spawn(command_tx.clone());
 
     // Accept loop on its own thread; it lives for the whole process, so the

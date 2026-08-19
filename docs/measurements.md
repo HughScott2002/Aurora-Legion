@@ -76,7 +76,8 @@ SIGTERM-to-exit latency measured at 160 ms with the slow tick active.
   is 11.5 MiB against 92.5 MiB. The resident part carries no GUI
   toolkit, renderer or tray stack.
 - Idle CPU is 0.05% against 0.13%. The remaining cost is the 100 ms
-  hotkey poll from `device_query`.
+  hotkey poll from `device_query`. That poll has since been removed, so
+  this figure predates it and the idle number needs re-measuring.
 - Swipe CPU is the same within noise, 0.50% against 0.52%. It is the
   same HID transition code, inherited from upstream.
 - The GTK4 GUI uses about 85 MiB while open, slightly less than

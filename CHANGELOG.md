@@ -14,6 +14,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps serving until it is restarted or the session ends, and nothing
   said so. Across a protocol change that looked like a broken install.
 
+### Removed
+
+- The Meta+Right Alt profile hotkey. It polled the X server ten times a
+  second for the whole life of the daemon, which was the only periodic
+  wakeup left after issue #1 and the entire remaining idle CPU cost
+  recorded in `docs/measurements.md`. It also only ever saw keystrokes
+  an X client had focus for, so on a Wayland session it did nothing at
+  the moment a user most expected it to. Bind `aurora cycle-profile` to
+  a desktop shortcut instead: it works on any compositor and needs no
+  daemon code. The protocol keeps its `hotkey` subsystem field, because
+  removing it would break clients over a feature nobody can use.
+
 ### Fixed
 
 - The permission-denied hint pointed at an anchor that does not exist

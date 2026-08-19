@@ -31,8 +31,8 @@ Based on [TigerBeetle's TIGER_STYLE](https://github.com/tigerbeetle/tigerbeetle/
 ## Architecture invariants
 
 - The daemon core loop is the single owner of daemon state: only the
-  core thread mutates it; everything else (IPC clients, hotkey, signal
-  listener) sends `Command` messages.
+  core thread mutates it; everything else (IPC clients, Fn+Space
+  listener, signal listener) sends `Command` messages.
 - `protocol/` stays UI-free and IO-free: types and schema only.
 - The GUI and CLI never touch the settings file; all state flows through
   the daemon socket.

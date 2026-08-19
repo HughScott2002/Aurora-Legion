@@ -13,7 +13,7 @@ flowchart LR
     GUI["GUI adapter"] --> IPC["protocol seam<br/>JSON lines"]
     CLI["CLI adapter"] --> IPC
     IPC --> SERVER["server module"]
-    HOTKEY["hotkey adapters"] --> CORE["core module"]
+    FNSPACE["Fn+Space listener"] --> CORE["core module"]
     SERVER --> CORE
     CORE --> ENGINE["effect engine"]
     CORE --> SETTINGS["settings"]
@@ -39,8 +39,8 @@ The core module alone mutates daemon state. It owns:
 - optional subsystem state;
 - subscriber snapshots.
 
-Server threads, signal handlers, hotkey listeners and the Fn+Space
-listener send commands. They never edit state in place.
+Server threads, signal handlers and the Fn+Space listener send commands.
+They never edit state in place.
 
 This makes the core module deep. Callers learn one command interface,
 while ordering, persistence and broadcasts stay behind it. That depth
@@ -63,8 +63,8 @@ driver's handle rather than opening a second handle.
 
 ## Optional subsystems
 
-Fn+Space detection, the profile hotkey and screen capture each depend on
-something a given machine may not have. None of them is required for
+Fn+Space detection and screen capture each depend on something a given
+machine may not have. None of them is required for
 lighting, so none of them fails the daemon. Each reports its own state
 instead, and that state reaches clients in every snapshot.
 

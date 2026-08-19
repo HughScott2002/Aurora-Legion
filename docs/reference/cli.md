@@ -72,6 +72,25 @@ onto it would. Aurora moves its own slot number; the hardware exposes
 no command to move the controller's counter. See
 [Use Fn+Space slots](../how-to/use-fn-space-slots.md).
 
+## `cycle-profile`
+
+```text
+aurora cycle-profile
+```
+
+Applies the next saved profile, wrapping at the end. If the current
+lighting was never saved, it starts from the first saved profile.
+
+This is meant to be bound to a keyboard shortcut. Aurora does not grab
+keys itself, because a daemon that watches the keyboard has to poll and
+only sees the keys its display server hands it. The desktop already
+does this properly, so bind it there:
+
+Settings, Keyboard, View and Customize Shortcuts, Custom Shortcuts, and
+add `aurora cycle-profile` with whatever key you want. The binding works
+on Wayland and X11 alike, and survives Aurora being restarted or
+upgraded.
+
 ## Effects
 
 ```text

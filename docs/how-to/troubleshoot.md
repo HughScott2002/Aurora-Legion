@@ -8,8 +8,8 @@ $ aurora status
 
 Then use the section that matches its output. `status` names any
 optional subsystem that is not working, with the reason: Fn+Space
-detection, the profile hotkey, and screen capture each report for
-themselves rather than failing silently.
+detection and screen capture each report for themselves rather than
+failing silently.
 
 For a stubborn fault, restart the daemon with tracing on:
 
