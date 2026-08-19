@@ -41,6 +41,29 @@ guide shipped in 0.24.0. What is left of the HIG pass: #4.
       granted nothing, and the 0.24.1 fix is confirmed only on a machine
       that already had Aurora working. Issue: #16, #20
 
+## Measurement
+
+Numbers were re-run after the hotkey removal and the method did not
+survive review. `docs/measure-compare.sh` is committed unfinished, with
+its gaps in its own header. Full context: #28.
+
+- [ ] Fix the harness before running it: raw counters in the CSV, paired
+      per-round deltas instead of independent medians, even round count,
+      schedstat nanoseconds instead of clock ticks. Issue: #28
+- [ ] Check by eye whether upstream keeps a static colour lit after it
+      exits. If it does, the claim that its window must stay resident is
+      overstated, and that claim is in the README. Issue: #28
+- [ ] Re-run both projects the same day, both scenarios. Upstream has no
+      controls-closed mode, `--hideWindow` is a no-op, so the asymmetry
+      is the result. Issue: #28
+- [ ] The GUI scenario compares a lone 85 MiB GUI against upstream and
+      omits the daemon running alongside it. Issue: #28
+- [ ] Per-client writer thread parks on its channel until there is
+      something to send, so a client that disconnects against an idle
+      daemon leaves it until the next broadcast. Bounded by any state
+      change, unbounded in principle. Found while counting threads; no
+      issue yet.
+
 ## Diagnostics
 
 - [ ] `aurora doctor`: enumerate the device, report whether the udev
