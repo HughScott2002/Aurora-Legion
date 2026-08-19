@@ -34,10 +34,12 @@ pub struct LightingPage {
     pub slot_note: gtk::Label,
 
     pub effect_row: adw::ComboRow,
+    pub effect_group: adw::PreferencesGroup,
 
     pub zone_buttons: [gtk::ColorDialogButton; 4],
     pub colors_group: adw::PreferencesGroup,
 
+    pub options_group: adw::PreferencesGroup,
     pub speed_row: adw::SpinRow,
     pub brightness_row: adw::SwitchRow,
     pub direction_row: adw::ComboRow,
@@ -147,7 +149,14 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     content.append(&preview_box);
 
     // --- Effect selector -------------------------------------------------
+    // Every group below the preview edits the selected slot, and the off
+    // position holds no lighting to edit, so all of them are built hidden
+    // and `sync_lighting_page` shows them once a lit slot is known. State
+    // arrives after the window does; a group built visible would be on
+    // screen during the gap and then vanish if the slot turned out to be
+    // off.
     let effect_group = adw::PreferencesGroup::new();
+    effect_group.set_visible(false);
 
     let names = effect_names();
     let effect_model = gtk::StringList::new(&names);
@@ -168,6 +177,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Zone colors ------------------------------------------------------
     let colors_group = adw::PreferencesGroup::new();
     colors_group.set_title("Zone Colors");
+    colors_group.set_visible(false);
 
     let zone_row = adw::ActionRow::new();
     zone_row.set_title("Zones");
@@ -220,6 +230,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Common options ---------------------------------------------------
     let options_group = adw::PreferencesGroup::new();
     options_group.set_title("Options");
+    options_group.set_visible(false);
 
     let speed_adjustment = gtk::Adjustment::new(1.0, 1.0, 10.0, 1.0, 1.0, 0.0);
     let speed_row = adw::SpinRow::new(Some(&speed_adjustment), 1.0, 0);
@@ -346,8 +357,10 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         off_button,
         slot_note,
         effect_row,
+        effect_group,
         zone_buttons,
         colors_group,
+        options_group,
         speed_row,
         brightness_row,
         direction_row,

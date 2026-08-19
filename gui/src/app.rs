@@ -726,6 +726,20 @@ impl App {
     }
 
     fn sync_lighting_page(&self, page: &lighting::LightingPage) {
+        // Nothing on this page can be decided without the daemon's slot, so
+        // the whole sync waits for state rather than syncing the editors
+        // from defaults and correcting them a moment later.
+        let Some(state) = &self.state else {
+            return;
+        };
+        let active_slot = state.active_slot;
+
+        // The off position holds no lighting: the daemon rejects an edit
+        // aimed at it, so the editors are removed rather than left on screen
+        // to be refused. Same rule as a setting an effect does not use, one
+        // level up.
+        let slot_is_lit = active_slot.index().is_some();
+
         // Effect combo.
         if let Some(index) = effect_index(self.lighting.effect) {
             if page.effect_row.selected() != index as u32 {
@@ -769,7 +783,14 @@ impl App {
         // page sits behind the disconnected view, the write is skipped, and
         // the row's own flag stays whatever it was. It reappears wrong when
         // the page comes back.
-        let takes_colors = self.lighting.effect.takes_color_array();
+        if page.effect_group.get_visible() != slot_is_lit {
+            page.effect_group.set_visible(slot_is_lit);
+        }
+        if page.options_group.get_visible() != slot_is_lit {
+            page.options_group.set_visible(slot_is_lit);
+        }
+
+        let takes_colors = slot_is_lit && self.lighting.effect.takes_color_array();
         if page.colors_group.get_visible() != takes_colors {
             page.colors_group.set_visible(takes_colors);
         }
@@ -783,7 +804,7 @@ impl App {
         }
 
         // Per-effect groups.
-        let is_ambient = matches!(self.lighting.effect, Effects::AmbientLight { .. });
+        let is_ambient = slot_is_lit && matches!(self.lighting.effect, Effects::AmbientLight { .. });
         if page.ambient_group.get_visible() != is_ambient {
             page.ambient_group.set_visible(is_ambient);
         }
@@ -798,7 +819,7 @@ impl App {
             }
         }
 
-        let is_swipe = matches!(self.lighting.effect, Effects::Swipe { .. } | Effects::SmoothWave { .. });
+        let is_swipe = slot_is_lit && matches!(self.lighting.effect, Effects::Swipe { .. } | Effects::SmoothWave { .. });
         if page.swipe_group.get_visible() != is_swipe {
             page.swipe_group.set_visible(is_swipe);
         }
@@ -821,10 +842,6 @@ impl App {
         }
 
         // --- Slots ---------------------------------------------------------
-        let Some(state) = &self.state else {
-            return;
-        };
-        let active_slot = state.active_slot;
         page.set_active_slot(active_slot);
 
         // Say so where the key would have been used, rather than letting
@@ -843,7 +860,10 @@ impl App {
                 let effect = state.current.slots[slot_index].effect;
                 format!("Slot {active_slot} of {SLOT_COUNT} \u{00b7} {effect}")
             }
-            None => "Backlight off".to_string(),
+            // The editors are gone in this position, and one line saying
+            // where they went is cheaper than leaving a page that reads as
+            // broken.
+            None => "Backlight off \u{00b7} Pick a slot to edit lighting".to_string(),
         };
         if page.slot_label.text() != slot_text.as_str() {
             page.slot_label.set_text(&slot_text);
