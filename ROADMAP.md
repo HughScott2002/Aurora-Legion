@@ -30,8 +30,10 @@ first-party tool on the desktop they target.
 - [x] Deliberate empty and error states: daemon not running, keyboard
       unplugged, permission missing. Every failure visible and
       recoverable from the UI. Issue: #5
-- [ ] Wayland-native hotkeys via the XDG GlobalShortcuts portal,
-      replacing evdev polling; works on any Wayland compositor. Issue: #6
+- [x] Wayland-native profile cycling. Settled by removing the evdev
+      hotkey rather than porting it: `aurora cycle-profile` bound to a
+      desktop shortcut works on any compositor and needs no daemon
+      code. Issue: #6
 - [ ] Ambient effect reliability on Wayland: survive portal
       re-authorization, degrade gracefully with clear UI state when
       capture is unavailable. Issue: #7
