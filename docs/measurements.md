@@ -79,17 +79,27 @@ Aurora's side only.
 
 | Scenario | Threads | PSS | CPU pass 1 | CPU pass 2 |
 | --- | --- | --- | --- | --- |
-| aurora daemon, Static, no hotkey | 7 | 14.4 MiB | 0.00% | 0.00% |
+| aurora daemon, Static, no hotkey | 7 | 14.4 MiB | 0 ticks | 0 ticks |
 | aurora daemon 0.24.1, Static, with hotkey | 8 | 14.9 MiB | not run |  |
+
+"0 ticks" is the raw counter, not a rate. No clock tick was charged to
+the process across either window, so its CPU is somewhere below 0.017%
+and this method cannot say where.
 
 Both rows are the same machine on the same day. The second is the
 installed 0.24.1 build, run specifically so the comparison would not
 cross dates.
 
-- CPU is zero to the resolution of the sampler. `CLK_TCK` is 100 here,
-  so a single clock tick inside a 60 second window is 0.017%, and the
-  daemon consumed no ticks at all across two consecutive windows. The
-  0.05% in the round above was the 100 ms poll and nothing else.
+- CPU is below the resolution of the sampler, which is not the same as
+  zero. `CLK_TCK` is 100 here, so one clock tick inside a 60 second
+  window is 0.017%, and the daemon consumed no ticks at all across two
+  consecutive windows. The honest reading is "0 ticks in 60 s, under
+  0.017%", not "0.00%".
+- This is consistent with the poll having been the whole of the earlier
+  0.05%, but it does not establish it. The old build's CPU was not
+  re-run, and certainly not interleaved with the new one, so the
+  comparison crosses three weeks of system drift. Treat the attribution
+  as inference until an interleaved A/B says otherwise.
 - Thread count is 7 against 8. The hotkey thread is the difference, and
   the old build says so in its own log: it prints `Hotkey is now Active`
   at startup, which the current one has nothing to print.
@@ -123,10 +133,10 @@ that connects and disconnects against a daemon nothing else is touching.
 - The resident process, which is what runs whenever your lights are on,
   is 11.5 MiB against 92.5 MiB. The resident part carries no GUI
   toolkit, renderer or tray stack.
-- Idle CPU was 0.05% against 0.13%, and the whole of Aurora's 0.05% was
-  the 100 ms hotkey poll from `device_query`. That poll has since been
-  removed and the daemon now measures zero to the sampler's resolution;
-  see the section above.
+- Idle CPU was 0.05% against 0.13%. The 100 ms hotkey poll from
+  `device_query` has since been removed and the daemon now measures
+  below the sampler's resolution; see the section above for what that
+  does and does not establish.
 - Swipe CPU is the same within noise, 0.50% against 0.52%. It is the
   same HID transition code, inherited from upstream.
 - The GTK4 GUI uses about 85 MiB while open, slightly less than
