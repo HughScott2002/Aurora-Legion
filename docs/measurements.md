@@ -70,14 +70,47 @@ stayed there.
 
 SIGTERM-to-exit latency measured at 160 ms with the slow tick active.
 
+## Idle CPU after removing the hotkey poll
+
+Measured 2026-08-18, same machine and same method, on the daemon with
+the Meta+Right Alt hotkey removed. Upstream was not re-measured, so no
+new ratio is claimed here: this section reports what changed on
+Aurora's side only.
+
+| Scenario | Threads | PSS | CPU pass 1 | CPU pass 2 |
+| --- | --- | --- | --- | --- |
+| aurora daemon, Static, no hotkey | 7 | 14.4 MiB | 0.00% | 0.00% |
+
+- CPU is zero to the resolution of the sampler. `CLK_TCK` is 100 here,
+  so a single clock tick inside a 60 second window is 0.017%, and the
+  daemon consumed no ticks at all across two consecutive windows. The
+  0.05% in the round above was the 100 ms poll and nothing else.
+- Thread count is 7 against 8. The hotkey thread is the difference.
+- PSS is 14.4 MiB against 11.5 MiB, and the hotkey removal does not
+  explain it, since dropping a thread cannot add memory. Attributing
+  that gap is open work. It is not caused by serving a client: a daemon
+  that has served a GUI session reads 15.2 MiB, so client traffic
+  accounts for about 0.8 MiB of the difference and no more. Until it is
+  attributed, the README comparison table keeps the older PSS figure
+  rather than quoting a number nobody has explained.
+
+Two connection threads are spawned per client and one of them, the
+writer, blocks on its channel until there is something to send. A client
+that disconnects while the daemon is idle therefore leaves its writer
+parked until the next state broadcast, which reclaims it. Observed at 10
+threads after two GUI sessions, back to 7 after one broadcast. Bounded
+in practice by any state change, unbounded in principle for a client
+that connects and disconnects against a daemon nothing else is touching.
+
 ## Interpretation
 
 - The resident process, which is what runs whenever your lights are on,
   is 11.5 MiB against 92.5 MiB. The resident part carries no GUI
   toolkit, renderer or tray stack.
-- Idle CPU is 0.05% against 0.13%. The remaining cost is the 100 ms
-  hotkey poll from `device_query`. That poll has since been removed, so
-  this figure predates it and the idle number needs re-measuring.
+- Idle CPU was 0.05% against 0.13%, and the whole of Aurora's 0.05% was
+  the 100 ms hotkey poll from `device_query`. That poll has since been
+  removed and the daemon now measures zero to the sampler's resolution;
+  see the section above.
 - Swipe CPU is the same within noise, 0.50% against 0.52%. It is the
   same HID transition code, inherited from upstream.
 - The GTK4 GUI uses about 85 MiB while open, slightly less than
