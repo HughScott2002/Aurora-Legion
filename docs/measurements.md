@@ -80,19 +80,35 @@ Aurora's side only.
 | Scenario | Threads | PSS | CPU pass 1 | CPU pass 2 |
 | --- | --- | --- | --- | --- |
 | aurora daemon, Static, no hotkey | 7 | 14.4 MiB | 0.00% | 0.00% |
+| aurora daemon 0.24.1, Static, with hotkey | 8 | 14.9 MiB | not run |  |
+
+Both rows are the same machine on the same day. The second is the
+installed 0.24.1 build, run specifically so the comparison would not
+cross dates.
 
 - CPU is zero to the resolution of the sampler. `CLK_TCK` is 100 here,
   so a single clock tick inside a 60 second window is 0.017%, and the
   daemon consumed no ticks at all across two consecutive windows. The
   0.05% in the round above was the 100 ms poll and nothing else.
-- Thread count is 7 against 8. The hotkey thread is the difference.
-- PSS is 14.4 MiB against 11.5 MiB, and the hotkey removal does not
-  explain it, since dropping a thread cannot add memory. Attributing
-  that gap is open work. It is not caused by serving a client: a daemon
-  that has served a GUI session reads 15.2 MiB, so client traffic
-  accounts for about 0.8 MiB of the difference and no more. Until it is
-  attributed, the README comparison table keeps the older PSS figure
-  rather than quoting a number nobody has explained.
+- Thread count is 7 against 8. The hotkey thread is the difference, and
+  the old build says so in its own log: it prints `Hotkey is now Active`
+  at startup, which the current one has nothing to print.
+- PSS is 14.4 MiB, against 11.5 MiB in the July round. The removal is
+  not the cause, and neither is the binary: the daemon is 8,733,032
+  bytes here against 8,737,128 installed, so it did not grow. Running
+  the installed 0.24.1 on the same day reads 14.9 MiB, so the July
+  figure does not reproduce for the old build either. The drift is
+  environmental, the same effect recorded between the 0.21.0 and 0.24.0
+  rounds when both projects gained about 10 MiB without changing their
+  own code. Measured against each other on one day, the removal is
+  0.5 MiB and one thread lighter.
+- Serving a client costs about 0.8 MiB and does not persist as a
+  separate effect: a daemon that has served a GUI session reads
+  15.2 MiB against 14.4 MiB clean.
+- The README comparison table still quotes the July PSS and CPU. Both
+  now need a round that re-measures upstream too, since comparing a
+  fresh Aurora number against a stale upstream one is the error this
+  document already refused to make once.
 
 Two connection threads are spawned per client and one of them, the
 writer, blocks on its channel until there is something to send. A client
