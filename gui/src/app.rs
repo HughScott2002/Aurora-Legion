@@ -588,7 +588,7 @@ impl SimpleComponent for App {
         }
 
         // --- Other pages ----------------------------------------------------
-        widgets.profiles.sync(&state.profiles, state.current.name.as_deref(), &sender);
+        widgets.profiles.sync(&state.profiles, state.current.name.as_deref(), &state.hotkey, &sender);
         widgets.custom.sync(&state.custom_effects, state.custom_effect_playing.as_deref(), &sender);
 
         // --- Daemon page ----------------------------------------------------

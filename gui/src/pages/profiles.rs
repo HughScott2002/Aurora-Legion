@@ -1,7 +1,7 @@
 //! The Profiles page: saved profiles as a boxed list, activate to apply,
 //! plus save-current-as and delete.
 
-use aurora_protocol::ipc::ProfileSummary;
+use aurora_protocol::ipc::{ProfileSummary, SubsystemState};
 use relm4::{
     adw::{self, prelude::*},
     gtk,
@@ -19,6 +19,15 @@ pub struct ProfilesPage {
     shown_names: Vec<String>,
 }
 
+/// What the page always says. The hotkey sentence is appended to it, or
+/// not, depending on what the daemon reports.
+const ACTIVATE_SENTENCE: &str = "Activate a profile to apply it.";
+
+/// The hotkey as a user sees it. The daemon calls the modifier Meta,
+/// which is the keycode name; GNOME calls the same key Super, and this
+/// text sits inside a GNOME app.
+const HOTKEY_NAME: &str = "Super+Right Alt";
+
 pub fn build(sender: &ComponentSender<App>) -> ProfilesPage {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
     content.set_margin_top(18);
@@ -28,7 +37,11 @@ pub fn build(sender: &ComponentSender<App>) -> ProfilesPage {
 
     let group = adw::PreferencesGroup::new();
     group.set_title("Saved Profiles");
-    group.set_description(Some("Activate a profile to apply it. Meta+Right Alt cycles through them."));
+    // The shortcut half of this description is written by `sync` once the
+    // daemon says whether the hotkey works here. Built without it: naming a
+    // shortcut that turns out to be unavailable is the silence-reads-as
+    // -working failure, one sentence earlier.
+    group.set_description(Some(ACTIVATE_SENTENCE));
 
     let save_button = gtk::Button::from_icon_name("document-new-symbolic");
     save_button.set_tooltip_text(Some("Save current settings as a profile"));
@@ -65,8 +78,35 @@ pub fn build(sender: &ComponentSender<App>) -> ProfilesPage {
 }
 
 impl ProfilesPage {
+    /// Say what the hotkey does, or why it does nothing here, in the one
+    /// place a user goes looking for it. A description that names a
+    /// shortcut the daemon has already reported as unavailable is the
+    /// app asserting something untrue about this machine.
+    fn sync_description(&self, hotkey: &SubsystemState) {
+        let description = match hotkey {
+            SubsystemState::Active => {
+                format!("{ACTIVATE_SENTENCE} {HOTKEY_NAME} cycles through them.")
+            }
+            SubsystemState::Unavailable { reason } => {
+                format!("{ACTIVATE_SENTENCE} {HOTKEY_NAME} is not available here ({reason}).")
+            }
+            SubsystemState::Degraded { reason } => {
+                format!("{ACTIVATE_SENTENCE} {HOTKEY_NAME} may not respond ({reason}).")
+            }
+            // Nothing has been reported yet, or the thread is not running.
+            // Claim neither way.
+            SubsystemState::Inactive | SubsystemState::Unknown => ACTIVATE_SENTENCE.to_string(),
+        };
+
+        if self.group.description().as_deref() != Some(description.as_str()) {
+            self.group.set_description(Some(&description));
+        }
+    }
+
     /// Rebuild the list when the set of saved profiles changed.
-    pub fn sync(&mut self, profiles: &[ProfileSummary], current_name: Option<&str>, sender: &ComponentSender<App>) {
+    pub fn sync(&mut self, profiles: &[ProfileSummary], current_name: Option<&str>, hotkey: &SubsystemState, sender: &ComponentSender<App>) {
+        self.sync_description(hotkey);
+
         let mut names: Vec<String> = Vec::with_capacity(profiles.len());
         for profile in profiles {
             names.push(profile.name.clone());
