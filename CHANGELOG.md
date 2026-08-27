@@ -8,49 +8,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `aurora status` and the app's Settings page now say when the running
-  daemon is older than the installed build. A package upgrade replaces
-  the binaries but does not restart a running daemon, so the old one
-  keeps serving until it is restarted or the session ends, and nothing
-  said so. Across a protocol change that looked like a broken install.
+- `aurora status` and Settings flag a daemon older than the installed
+  build.
 
 ### Changed
 
-- The Lighting page removes the controls a position cannot use instead of
-  greying them out. The off position holds no lighting, so the daemon
-  refused every edit aimed at it and the refusal arrived as a toast. A
-  control that fails when used teaches nothing about why, so Effect, Zone
-  Colors, Options, Ambient and Swipe are gone until a lit slot is chosen.
-- The off position no longer shows an unlit keyboard preview. The card
-  and its caption are removed rather than emptied, and a single faded
-  mark takes the middle of the page instead. A card left on screen with
-  nothing in it reads as a rendering fault, not as a backlight that is
-  off. The mark uses a slashed icon, because the brightness icons differ
-  from their lit versions only by weight and so read as "on, a bit" at a
-  glance.
-- Off leads the slot picker, ahead of the three lit slots. It is the
-  position the backlight starts from and returns to, and the lit slots
-  now read in their own order instead of being interrupted at the end.
-  Fn+Space still cycles in the firmware's order.
+- Controls a position cannot use are removed, not greyed out. Backlight
+  off hides Effect, Zone Colors, Options, Ambient and Swipe.
+- Backlight off replaces the keyboard preview with a faded mark.
+- Off leads the slot picker.
 
 ### Removed
 
-- The Meta+Right Alt profile hotkey. It polled the X server ten times a
-  second for the whole life of the daemon, which was the only periodic
-  wakeup left after issue #1 and the entire remaining idle CPU cost
-  recorded in `docs/measurements.md`. It also only ever saw keystrokes
-  an X client had focus for, so on a Wayland session it did nothing at
-  the moment a user most expected it to. Bind `aurora cycle-profile` to
-  a desktop shortcut instead: it works on any compositor and needs no
-  daemon code. The protocol keeps its `hotkey` subsystem field, because
-  removing it would break clients over a feature nobody can use.
+- Meta+Right Alt profile hotkey. Bind `aurora cycle-profile` to a
+  desktop shortcut instead. The protocol keeps its `hotkey` field.
 
 ### Fixed
 
-- The permission-denied hint pointed at an anchor that does not exist
-  (`quick-start.md#keyboard-access`). It now points at the real heading
-  in the install guide. This is the one link shown on the exact failure
-  a missing udev rule produces.
+- Permission-denied hint linked a dead anchor.
 
 ## [0.24.1] - 2026-07-27
 
