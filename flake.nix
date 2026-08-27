@@ -217,7 +217,9 @@
           workspaceSrcString = builtins.toString workspaceSrc;
 
           dataFileFilter =
-            path: _type: (lib.hasPrefix "${workspaceSrcString}/gui/data/" path) || (lib.hasPrefix "${workspaceSrcString}/systemd/" path);
+            path: _type:
+            (lib.hasPrefix "${workspaceSrcString}/gui/data/" path)
+            || (lib.hasPrefix "${workspaceSrcString}/systemd/" path);
           workspaceFilter = path: type: (dataFileFilter path type) || (craneLib.filterCargoSources path type);
 
           src = lib.cleanSourceWith {
