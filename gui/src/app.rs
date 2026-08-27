@@ -853,33 +853,35 @@ impl App {
         };
         page.set_slot_note(slot_note.as_deref());
 
-        // --- Caption ---------------------------------------------------------
-        // One secondary line: which slot, and what it holds.
-        let slot_text = match active_slot.index() {
-            Some(slot_index) => {
-                let effect = state.current.slots[slot_index].effect;
-                format!("Slot {active_slot} of {SLOT_COUNT} \u{00b7} {effect}")
-            }
-            // The editors are gone in this position, and one line saying
-            // where they went is cheaper than leaving a page that reads as
-            // broken.
-            None => "Backlight off \u{00b7} Pick a slot to edit lighting".to_string(),
-        };
-        if page.slot_label.text() != slot_text.as_str() {
-            page.slot_label.set_text(&slot_text);
+        // --- Preview and off state -------------------------------------------
+        // Two states, never both. Lit: the preview card shows what the
+        // keyboard is doing, with nothing zone-coloured for effects that
+        // ignore zone colours, and a caption naming the slot. Off: there is
+        // no lighting to preview and none to edit, so the card and its
+        // caption go and the off mark takes the space. An empty card left
+        // on screen reads as a rendering fault, not as "off".
+        let lit_slot = active_slot.index();
+        let backlight_off = lit_slot.is_none();
+
+        if page.preview_box.get_visible() == backlight_off {
+            page.preview_box.set_visible(!backlight_off);
         }
-        if !page.slot_label.get_visible() {
-            page.slot_label.set_visible(true);
+        if page.off_state.get_visible() != backlight_off {
+            page.off_state.set_visible(backlight_off);
         }
 
-        // --- Preview ---------------------------------------------------------
-        // Shows what the keyboard is actually doing: darkness while off,
-        // and nothing zone-coloured for effects that ignore zone colours.
-        let preview_colors = match active_slot.index() {
-            None => [[0; 3]; 4],
-            Some(_) => preview_zone_colors(&self.lighting),
-        };
-        page.preview.set_colors(preview_colors);
+        if let Some(slot_index) = lit_slot {
+            page.preview.set_colors(preview_zone_colors(&self.lighting));
+
+            let effect = state.current.slots[slot_index].effect;
+            let slot_text = format!("Slot {active_slot} of {SLOT_COUNT} \u{00b7} {effect}");
+            if page.slot_label.text() != slot_text.as_str() {
+                page.slot_label.set_text(&slot_text);
+            }
+            if !page.slot_label.get_visible() {
+                page.slot_label.set_visible(true);
+            }
+        }
     }
 }
 

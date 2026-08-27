@@ -14,6 +14,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps serving until it is restarted or the session ends, and nothing
   said so. Across a protocol change that looked like a broken install.
 
+### Changed
+
+- The Lighting page removes the controls a position cannot use instead of
+  greying them out. The off position holds no lighting, so the daemon
+  refused every edit aimed at it and the refusal arrived as a toast. A
+  control that fails when used teaches nothing about why, so Effect, Zone
+  Colors, Options, Ambient and Swipe are gone until a lit slot is chosen.
+- The off position no longer shows an unlit keyboard preview. The card
+  and its caption are removed rather than emptied, and a single faded
+  mark takes the middle of the page instead. A card left on screen with
+  nothing in it reads as a rendering fault, not as a backlight that is
+  off. The mark uses a slashed icon, because the brightness icons differ
+  from their lit versions only by weight and so read as "on, a bit" at a
+  glance.
+- Off leads the slot picker, ahead of the three lit slots. It is the
+  position the backlight starts from and returns to, and the lit slots
+  now read in their own order instead of being interrupted at the end.
+  Fn+Space still cycles in the firmware's order.
+
 ### Removed
 
 - The Meta+Right Alt profile hotkey. It polled the X server ten times a
