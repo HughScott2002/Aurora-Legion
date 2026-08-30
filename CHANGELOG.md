@@ -14,6 +14,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps serving until it is restarted or the session ends, and nothing
   said so. Across a protocol change that looked like a broken install.
 
+### Changed
+
+- The app icon is now the real Aurora mark, replacing the placeholder
+  drawing of a laptop deck and its backlight strip. The icon name is
+  unchanged, so the desktop entry, the flake, the tarball and the
+  AppImage all pick the new artwork up with no packaging change. The
+  export also carried no intrinsic size, which renders as nothing in
+  tools that rasterise without a viewport, so it now declares one (#2).
+
 ### Removed
 
 - The Meta+Right Alt profile hotkey. It polled the X server ten times a
