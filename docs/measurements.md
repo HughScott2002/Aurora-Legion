@@ -72,6 +72,10 @@ SIGTERM-to-exit latency measured at 160 ms with the slow tick active.
 
 ## Idle CPU after removing the hotkey poll
 
+The hotkey was restored on 2026-08-29, so the "no hotkey" row below no
+longer describes the shipping daemon. The round stands as taken: it
+records what removing the poll was worth, not what the daemon does now.
+
 Measured 2026-08-18, same machine and same method, on the daemon with
 the Meta+Right Alt hotkey removed. Upstream was not re-measured, so no
 new ratio is claimed here: this section reports what changed on
