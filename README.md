@@ -1,4 +1,4 @@
-<img width="1280" height="320" alt="Aurora Banner" src="https://github.com/user-attachments/assets/f2dd9300-f61f-4b41-a90d-e72f303c815b" />
+<img width="1280" height="320" alt="Aurora_1" src="https://github.com/user-attachments/assets/e37da1b4-dcee-42c0-8d08-c3d73bd529b2" />
 
 <div align="center">
 
