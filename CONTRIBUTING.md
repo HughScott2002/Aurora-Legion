@@ -32,6 +32,20 @@ paths, and use stock libadwaita in the GUI.
 
 - Conventional commits: `type(scope): imperative summary`, subject at
   most 72 characters, no trailing period.
+- Sign your commits. Set it up once per machine:
+
+  ```console
+  $ git config --global gpg.format ssh
+  $ git config --global user.signingkey ~/.ssh/id_ed25519.pub
+  $ git config --global commit.gpgsign true
+  ```
+
+  Add that same public key to your GitHub account a second time, as a
+  signing key rather than an authentication key, or GitHub shows the
+  commits as unverified even though they are signed. GPG works just as
+  well if you already use it: skip the `gpg.format` line and set
+  `user.signingkey` to your key ID. Check your own work with
+  `git log --format='%h %G? %s'`, where `G` is a good signature.
 - No AI attribution trailers.
 - Body only for the non-obvious why, breaking changes or migrations.
 - No em dashes in docs or user-facing strings.
@@ -61,8 +75,9 @@ To cut version X.Y.Z:
    fails without one.
 5. Optionally verify the tarball locally first:
    `docker run --rm -v "$PWD:/src" -w /src ubuntu:24.04 bash contrib/build-tarball.sh`
-6. Commit as `chore(release): vX.Y.Z` and push (the pre-push hook runs
-   `nix build`).
+6. Commit as `chore(release): vX.Y.Z` and push (the pre-push gate runs
+   clippy, the tests and a build). Run `nix build` yourself as well:
+   it is what the release workflow packages and it is not a gate stage.
 7. Tag and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 8. Watch the workflow (`gh run watch`), then download the published
    asset and confirm it unpacks and `bin/aurora --help` runs.
