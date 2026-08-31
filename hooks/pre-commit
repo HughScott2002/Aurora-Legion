@@ -1,0 +1,58 @@
+#!/bin/sh
+# Pre-commit gate: formatting, and nothing else.
+#
+# The pre-push gate checks formatting too, but it runs once per batch of
+# commits, so a badly formatted one is found late and costs an amend or a
+# cleanup commit. Catching it here keeps the fix to `cargo fmt --all` and a
+# re-run of the same commit.
+#
+# Only formatting belongs at this level. Clippy, the tests and the build stay
+# at push, where paying for them once per batch is the right trade.
+#
+# This checks rather than fixes on purpose. A hook that ran `cargo fmt` and
+# re-staged the result would pull unstaged work into the commit whenever the
+# author had staged a file in parts with `git add -p`, which is a worse
+# surprise than being told to run one command.
+#
+# Enable once per clone with `git config core.hooksPath hooks`. The devshell
+# does it for you. Bypass for emergencies:
+#   git commit --no-verify
+
+# Nothing to check unless Rust is being committed, so a docs-only commit pays
+# nothing at all for this hook. Deleted files are excluded: there is no
+# content left in them to format.
+staged_rust=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+
+if [ -z "$staged_rust" ]; then
+    exit 0
+fi
+
+# Prefer cargo straight off PATH. This stage parses the source and never
+# builds it, so unlike the pre-push stages it needs none of the native
+# libraries the devshell carries, and going through `nix develop` would add
+# seconds to every single commit for nothing.
+if command -v cargo >/dev/null 2>&1; then
+    have_cargo=1
+elif command -v nix >/dev/null 2>&1; then
+    have_cargo=0
+else
+    echo "pre-commit: no cargo and no nix on PATH, skipping the format check" >&2
+    exit 0
+fi
+
+run_fmt_check() {
+    if [ "$have_cargo" = "1" ]; then
+        cargo fmt --all --check
+    else
+        nix develop -c cargo fmt --all --check
+    fi
+}
+
+if run_fmt_check; then
+    exit 0
+fi
+
+echo "" >&2
+echo "pre-commit: formatting. Run this, then commit again:" >&2
+echo "  cargo fmt --all" >&2
+exit 1
