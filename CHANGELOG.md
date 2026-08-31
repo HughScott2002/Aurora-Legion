@@ -18,11 +18,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Backlight off replaces the keyboard preview with a faded mark.
 - Off leads the slot picker.
 
-### Removed
-
-- Meta+Right Alt profile hotkey. Bind `aurora cycle-profile` to a
-  desktop shortcut instead. The protocol keeps its `hotkey` field.
-
 ### Fixed
 
 - Permission-denied hint linked a dead anchor.
