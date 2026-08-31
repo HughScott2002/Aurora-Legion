@@ -9,9 +9,6 @@ Loading a custom effect from a file is the only way to get one, and
 nothing writes such a file. Export comes before in-app authoring. Full
 ordering: #17.
 
-- [ ] Drop the blanket `*.json` from `.gitignore` first. Both exported
-      formats are JSON, so example files would be silently ignored.
-      Hides nothing today. Issue: #12
 - [ ] Export a profile or custom effect from the GUI and the CLI.
       Issue: #17
 - [ ] Custom Effects empty state should say where a file comes from
