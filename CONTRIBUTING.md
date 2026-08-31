@@ -15,9 +15,14 @@ paths, and use stock libadwaita in the GUI.
 
 - Follow [Build from source](docs/how-to/build-from-source.md) for the
   development shell, native dependencies and checks.
-- Enable the local build gate once per clone:
-  `git config core.hooksPath hooks`. It runs `nix build` before every
-  push; there is no CI, the gate is the check.
+- Enable the local gate once per clone: `git config core.hooksPath hooks`.
+  Entering the development shell does it for you. There is no CI beyond
+  the release workflow, so the gate is the check: it rejects AI
+  attribution trailers, then runs clippy, the tests and a cargo build.
+  It runs those inside `nix develop` when nix is present and calls cargo
+  directly when it is not, so nix is not required to contribute. Skip
+  the compile stages with `SKIP_BUILD=1 git push`; the trailer scan
+  always runs.
 - Verify changes against the real daemon, not just the compiler: run it,
   drive it with `aurora status` / `aurora set` or the GUI.
 - Put user documentation in the right
