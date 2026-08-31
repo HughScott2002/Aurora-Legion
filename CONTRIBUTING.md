@@ -18,11 +18,14 @@ paths, and use stock libadwaita in the GUI.
 - Enable the local gate once per clone: `git config core.hooksPath hooks`.
   Entering the development shell does it for you. There is no CI beyond
   the release workflow, so the gate is the check: it rejects AI
-  attribution trailers, then runs clippy, the tests and a cargo build.
-  It runs those inside `nix develop` when nix is present and calls cargo
-  directly when it is not, so nix is not required to contribute. Skip
-  the compile stages with `SKIP_BUILD=1 git push`; the trailer scan
-  always runs.
+  attribution trailers, then checks formatting and runs clippy, the
+  tests and a cargo build. It runs those inside `nix develop` when nix
+  is present and calls cargo directly when it is not, so nix is not
+  required to contribute. Skip the compile stages with
+  `SKIP_BUILD=1 git push`; the trailer scan always runs.
+- Point git at the reformat list once, so `git blame` looks past the
+  commits that only moved whitespace:
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 - Verify changes against the real daemon, not just the compiler: run it,
   drive it with `aurora status` / `aurora set` or the GUI.
 - Put user documentation in the right

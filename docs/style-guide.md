@@ -24,6 +24,10 @@ Based on [TigerBeetle's TIGER_STYLE](https://github.com/tigerbeetle/tigerbeetle/
   `window_secs`.
 - **Short, flat functions.** Around 70 lines maximum, control flow flat,
   no recursion.
+- **100 column source lines.** `rustfmt.toml` sets the limit and the
+  pre-push gate checks it, so run `cargo fmt --all` before pushing. This
+  is a source width and has nothing to do with `MAX_LINE_BYTES`, which
+  bounds a line of JSON on the IPC socket.
 - **No `unwrap`/`expect` on daemon paths.** Every driver or IO error is
   handled or surfaced as `KeyboardStatus`/`Response::Error`. The GUI may
   `expect` only on programmer-error invariants.

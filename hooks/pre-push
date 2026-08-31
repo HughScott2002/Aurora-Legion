@@ -2,13 +2,13 @@
 # Pre-push gate. There is no CI beyond the release workflow, so this is the
 # check. Stages run cheapest first:
 #   1. No AI attribution trailers among the outgoing commits.
-#   2. Lints.
-#   3. Tests.
-#   4. A build.
+#   2. Formatting.
+#   3. Lints.
+#   4. Tests.
+#   5. A build.
 #
-# Formatting is deliberately not a stage yet: rustfmt.toml is inherited from
-# upstream and its 200 column limit does not match how this code is written.
-# Settle the config first, then add `cargo fmt --all --check` here.
+# Formatting runs first of the four compile stages because it is the only one
+# that does not compile anything, so it fails in about a second when it fails.
 #
 # Enable once per clone with `git config core.hooksPath hooks`. The devshell
 # does it for you.
@@ -103,6 +103,11 @@ run_check() {
 # them in step with flake.nix if either changes there.
 scrap_cxxflags="-include cstdint"
 scrap_feature="aurora/scrap-pkg-config"
+
+# No CXXFLAGS or feature flags here: this stage parses the source and never
+# builds it, so it needs nothing that scrap needs.
+echo "pre-push: checking formatting"
+run_check cargo fmt --all --check || exit 1
 
 echo "pre-push: running clippy"
 run_check env CXXFLAGS="$scrap_cxxflags" \

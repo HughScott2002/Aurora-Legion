@@ -1,0 +1,6 @@
+# Commits that only moved whitespace. Tell git to look past them:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub reads this file on its own and needs no configuration.
+
+# style: format the tree at 100 columns (#33)
+9040e9b9509d09116fca4043f44499fdf43b87a9
