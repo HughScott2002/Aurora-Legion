@@ -17,13 +17,18 @@
 # maintainer who does not run NixOS can still push. Bypass the compile stages
 # for emergencies:
 #   SKIP_BUILD=1 git push
-# SKIP_NIX_BUILD is honoured as the old name for the same switch.
+# SKIP_NIX_BUILD is honoured as the old name for the same switch. A push made
+# entirely of ref deletions skips them without being asked.
 #
 # The trailer scan has no bypass of its own. A commit that trips it has to be
 # rewritten, because once it is pushed the only fix left is a force-push.
 
 zero_sha=0000000000000000000000000000000000000000
 trailer_pattern='^(Co-Authored-By:[[:space:]]*Claude|Claude-Session:)'
+
+# Set by any ref that adds commits, so a push made entirely of deletions can
+# skip the compile stages below. Nothing is being added for them to check.
+pushing_commits=0
 
 # git feeds one line per ref being pushed:
 #   <local ref> <local sha> <remote ref> <remote sha>
@@ -34,6 +39,8 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
         # Deleting a ref. Nothing is being added, so there is nothing to scan.
         continue
     fi
+
+    pushing_commits=1
 
     if [ "$remote_sha" = "$zero_sha" ]; then
         # A ref the remote does not have yet. Scan what it adds that is not
@@ -63,8 +70,13 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
     fi
 done
 
+if [ "$pushing_commits" = "0" ]; then
+    echo "pre-push: nothing but ref deletions, skipping the compile stages"
+    exit 0
+fi
+
 if [ "${SKIP_BUILD:-${SKIP_NIX_BUILD:-0}}" = "1" ]; then
-    echo "pre-push: SKIP_BUILD=1 set, skipping the compile stages"
+    echo "pre-push: skip requested, skipping the compile stages"
     exit 0
 fi
 
