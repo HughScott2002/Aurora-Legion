@@ -81,9 +81,10 @@ impl Settings {
     pub fn load_or_migrate() -> Self {
         let Some(path) = settings_file_path() else {
             eprintln!("settings: no config directory available, starting with defaults");
-            let mut settings = Self::default();
-            settings.save_blocked = Some("no config directory available".to_string());
-            return settings;
+            return Self {
+                save_blocked: Some("no config directory available".to_string()),
+                ..Self::default()
+            };
         };
 
         if path.is_file() {
@@ -115,9 +116,10 @@ impl Settings {
             Err(error) => {
                 let reason = format!("could not read {}: {error}", path.display());
                 eprintln!("settings: {reason}, using defaults");
-                let mut settings = Self::default();
-                settings.save_blocked = Some(reason);
-                return settings;
+                return Self {
+                    save_blocked: Some(reason),
+                    ..Self::default()
+                };
             }
         };
 
@@ -136,9 +138,10 @@ impl Settings {
                 eprintln!("settings: {reason}");
                 preserve_corrupt_file(path);
                 eprintln!("settings: refusing to overwrite it; this session will not save settings");
-                let mut settings = Self::default();
-                settings.save_blocked = Some(reason);
-                return settings;
+                return Self {
+                    save_blocked: Some(reason),
+                    ..Self::default()
+                };
             }
         };
 
@@ -546,8 +549,10 @@ mod tests {
     /// unable to save, or shutdown overwrites the only copy with defaults.
     #[test]
     fn unparseable_settings_block_saving() {
-        let mut settings = Settings::default();
-        settings.save_blocked = Some("could not parse".to_string());
+        let settings = Settings {
+            save_blocked: Some("could not parse".to_string()),
+            ..Default::default()
+        };
 
         let save_result = settings.save();
         assert!(save_result.is_err(), "a blocked save must not write");

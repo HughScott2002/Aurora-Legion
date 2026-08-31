@@ -295,10 +295,14 @@ mod tests {
     /// was silently dropped.
     #[test]
     fn lighting_equality_sees_inner_effect_settings() {
-        let mut slow = Lighting::default();
-        slow.effect = Effects::AmbientLight { fps: 10, saturation_boost: 0.0 };
-        let mut fast = Lighting::default();
-        fast.effect = Effects::AmbientLight { fps: 60, saturation_boost: 0.0 };
+        let slow = Lighting {
+            effect: Effects::AmbientLight { fps: 10, saturation_boost: 0.0 },
+            ..Default::default()
+        };
+        let fast = Lighting {
+            effect: Effects::AmbientLight { fps: 60, saturation_boost: 0.0 },
+            ..Default::default()
+        };
 
         assert_ne!(slow, fast);
         assert!(slow.effect.same_variant(fast.effect));

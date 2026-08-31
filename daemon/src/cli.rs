@@ -3,7 +3,12 @@
 //! daemon is running (hardware effects only — software effects need a
 //! process that stays alive, which is the daemon's job).
 
-use std::{convert::TryInto, path::PathBuf, process::ExitCode, str::FromStr};
+use std::{
+    convert::TryInto,
+    path::{Path, PathBuf},
+    process::ExitCode,
+    str::FromStr,
+};
 
 use aurora_protocol::{
     custom_effect::CustomEffect,
@@ -317,7 +322,7 @@ fn run_set(args: &SetArgs) -> ExitCode {
     }
 }
 
-fn run_load_profile(path: &PathBuf) -> ExitCode {
+fn run_load_profile(path: &Path) -> ExitCode {
     let profile = match Profile::load_profile(path) {
         Ok(profile) => profile,
         Err(_) => {
@@ -400,7 +405,7 @@ fn print_outcome(response: Result<Response, ClientError>, success_message: &str)
     }
 }
 
-fn run_custom_effect(path: &PathBuf) -> ExitCode {
+fn run_custom_effect(path: &Path) -> ExitCode {
     let effect = match CustomEffect::from_file(path) {
         Ok(effect) => effect,
         Err(_) => {
