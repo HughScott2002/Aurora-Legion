@@ -60,6 +60,7 @@ pub enum Command {
         request: Request,
         out_tx: Sender<Outbound>,
     },
+    CycleProfile,
     /// The Fn+Space "light profile change" event fired; sent by the slot
     /// watcher thread. The core advances its slot once per event.
     HardwareSlotEvent,
@@ -250,6 +251,12 @@ impl Core {
                 let send_result = out_tx.send(Outbound::Response(envelope));
                 if send_result.is_err() {
                     // Client vanished between request and response; harmless.
+                }
+            }
+            Command::CycleProfile => {
+                let response = self.cycle_profile();
+                if let Response::Error { message, .. } = response {
+                    eprintln!("core: hotkey profile cycle failed: {message}");
                 }
             }
             Command::HardwareSlotEvent => {

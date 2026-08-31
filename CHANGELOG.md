@@ -17,6 +17,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   off hides Effect, Zone Colors, Options, Ambient and Swipe.
 - Backlight off replaces the keyboard preview with a faded mark.
 - Off leads the slot picker.
+- The app icon is the real Aurora mark, and declares an intrinsic size
+  so it renders in tools that rasterise without a viewport (#2).
 
 ### Fixed
 

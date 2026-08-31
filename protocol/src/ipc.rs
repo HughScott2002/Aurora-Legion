@@ -292,10 +292,7 @@ pub enum SubsystemState {
 pub enum Subsystem {
     /// Fn+Space detection through the ACPI netlink socket.
     SlotSync,
-    /// The Meta+RightAlt profile hotkey, which current daemons no longer
-    /// have. Kept because a client may be talking to an older daemon that
-    /// still reports it, and dropping it would spend a protocol break on
-    /// a feature removal.
+    /// The Meta+RightAlt profile hotkey.
     Hotkey,
     /// Screen capture for the Ambient effect.
     ScreenCapture,
@@ -340,10 +337,7 @@ pub struct DaemonState {
     /// slots still work; they just have to be selected rather than
     /// cycled with the key.
     pub slot_sync: SubsystemState,
-    /// The Meta+RightAlt profile hotkey. Current daemons leave this
-    /// [`SubsystemState::Unknown`]: the hotkey was removed, and
-    /// `aurora cycle-profile` bound to a desktop shortcut replaces it.
-    /// Older daemons still report it, so clients must handle every state.
+    /// The Meta+RightAlt profile hotkey.
     pub hotkey: SubsystemState,
     /// Screen capture, used only by the Ambient effect.
     pub screen_capture: SubsystemState,
