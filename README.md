@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/Rust-1.94-B7410E?logo=rust&logoColor=white" alt="Rust 1.94" />
   <img src="https://img.shields.io/badge/GTK4-libadwaita-4A86CF?logo=gnome&logoColor=white" alt="GTK4 and libadwaita" />
   <img src="https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos" alt="Nix flake" />
+  <a href="docs/style-guide.md"><img src="https://img.shields.io/badge/code_style-TigerStyle-0b7285" alt="TigerStyle" /></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0" />
 </p>
 
@@ -155,6 +156,10 @@ graph LR
 
 The daemon owns the lighting, profiles and effects. The GUI and CLI send
 it commands, so they can close without taking your lighting with them.
+
+It is written to [TigerStyle](docs/style-guide.md), adapted to Rust:
+every queue and retry bounded, invariants asserted at the boundaries,
+and no `unwrap` on a path the daemon depends on.
 
 Read [Architecture](docs/explanation/architecture.md) for the design or
 [IPC protocol](docs/protocol.md) to build another client. The deeper
