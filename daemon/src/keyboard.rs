@@ -14,7 +14,12 @@ use crate::engine::StopSignals;
 /// Backoff schedule between acquisition attempts. The last entry repeats
 /// forever, so a daemon started with the lid closed or the rule missing
 /// keeps trying every ten seconds without spamming.
-pub const ACQUIRE_BACKOFF: [Duration; 4] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(5), Duration::from_secs(10)];
+pub const ACQUIRE_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+];
 
 pub fn backoff_delay(attempt_count: u32) -> Duration {
     let last_index = ACQUIRE_BACKOFF.len() - 1;

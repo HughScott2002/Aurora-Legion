@@ -6,8 +6,19 @@ use rand::Rng;
 use crate::engine::Inner;
 
 pub fn play(manager: &mut Inner, p: &Lighting, rng: &mut rand::rngs::ThreadRng) {
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
-        let colors = [[255, 0, 0], [255, 255, 0], [0, 255, 0], [0, 255, 255], [0, 0, 255], [255, 0, 255]];
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
+        let colors = [
+            [255, 0, 0],
+            [255, 255, 0],
+            [0, 255, 0],
+            [0, 255, 255],
+            [0, 0, 255],
+            [255, 0, 255],
+        ];
         let colors_index = rng.random_range(0..6);
         let new_values = colors[colors_index];
 

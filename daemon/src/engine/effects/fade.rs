@@ -7,8 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use device_query::DeviceQuery;
 use aurora_protocol::profile::Lighting;
+use device_query::DeviceQuery;
 
 use crate::engine::Inner;
 
@@ -25,7 +25,9 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
 
         loop {
             if !state.get_keys().is_empty() {
-                stop_signals.keyboard_stop_signal.store(true, Ordering::SeqCst);
+                stop_signals
+                    .keyboard_stop_signal
+                    .store(true, Ordering::SeqCst);
             }
 
             if exit_thread.load(Ordering::SeqCst) {
@@ -37,7 +39,11 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
     });
 
     let mut now = Instant::now();
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
         if state.get_keys().is_empty() {
             if now.elapsed() > Duration::from_secs(20 / u64::from(p.speed)) {
                 if !manager.write_transition(&[0; 12], 230, 3) {
@@ -50,7 +56,10 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
             if !manager.write_colors(&p.rgb_array()) {
                 break;
             }
-            manager.stop_signals.keyboard_stop_signal.store(false, Ordering::SeqCst);
+            manager
+                .stop_signals
+                .keyboard_stop_signal
+                .store(false, Ordering::SeqCst);
             now = Instant::now();
         }
     }

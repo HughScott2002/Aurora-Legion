@@ -7,8 +7,7 @@
 
 use relm4::{
     adw::{self, prelude::*},
-    gtk,
-    ComponentSender,
+    gtk, ComponentSender,
 };
 
 use crate::{
@@ -59,7 +58,9 @@ pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
     autostart_row.set_subtitle("Enable the systemd user service");
     let autostart_sender = sender.clone();
     autostart_row.connect_active_notify(move |row| {
-        autostart_sender.input(AppMsg::AutostartToggled { enabled: row.is_active() });
+        autostart_sender.input(AppMsg::AutostartToggled {
+            enabled: row.is_active(),
+        });
     });
     service_group.add(&autostart_row);
 
@@ -72,13 +73,25 @@ pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
     let project_group = adw::PreferencesGroup::new();
     project_group.set_title("Project");
 
-    let issue_row = link_row("Report an Issue", "Bugs, or a laptop Aurora does not drive properly", links::NEW_ISSUE_URL);
+    let issue_row = link_row(
+        "Report an Issue",
+        "Bugs, or a laptop Aurora does not drive properly",
+        links::NEW_ISSUE_URL,
+    );
     project_group.add(&issue_row);
 
-    let discussions_row = link_row("Ask a Question", "Discussions on GitHub", links::DISCUSSIONS_URL);
+    let discussions_row = link_row(
+        "Ask a Question",
+        "Discussions on GitHub",
+        links::DISCUSSIONS_URL,
+    );
     project_group.add(&discussions_row);
 
-    let star_row = link_row("Star on GitHub", "Helps other Legion owners find Aurora", links::REPOSITORY_URL);
+    let star_row = link_row(
+        "Star on GitHub",
+        "Helps other Legion owners find Aurora",
+        links::REPOSITORY_URL,
+    );
     project_group.add(&star_row);
 
     content.append(&project_group);
@@ -86,7 +99,10 @@ pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
     // --- Credit -----------------------------------------------------------
     // A footer, not a group: this is the smallest thing on the page and
     // should read that way.
-    let credit = gtk::Label::new(Some(&format!("Aurora {} \u{00b7} GPL-3.0 \u{00b7} Hugh Scott", env!("CARGO_PKG_VERSION"))));
+    let credit = gtk::Label::new(Some(&format!(
+        "Aurora {} \u{00b7} GPL-3.0 \u{00b7} Hugh Scott",
+        env!("CARGO_PKG_VERSION")
+    )));
     credit.add_css_class("caption");
     credit.add_css_class("dim-label");
     credit.set_wrap(true);

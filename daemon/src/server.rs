@@ -9,8 +9,10 @@ use std::{
     thread,
 };
 
+use aurora_protocol::ipc::{
+    ErrorKind, EventEnvelope, RequestEnvelope, Response, ResponseEnvelope, MAX_LINE_BYTES,
+};
 use crossbeam_channel::{Receiver, Sender};
-use aurora_protocol::ipc::{ErrorKind, EventEnvelope, RequestEnvelope, Response, ResponseEnvelope, MAX_LINE_BYTES};
 
 use crate::core::{Command, Outbound};
 
@@ -36,7 +38,8 @@ pub fn bind_socket(socket_path: &Path) -> BindOutcome {
                 // Only ConnectionRefused proves the socket is dead. Any
                 // other error (permissions, interrupts) must not trigger an
                 // unlink that could tear down a live daemon's socket.
-                Err(probe_error) if probe_error.kind() == std::io::ErrorKind::ConnectionRefused => {}
+                Err(probe_error) if probe_error.kind() == std::io::ErrorKind::ConnectionRefused => {
+                }
                 Err(probe_error) => return BindOutcome::Failed(probe_error),
             }
 
@@ -103,7 +106,9 @@ fn client_reader_loop(stream: UnixStream, command_tx: &Sender<Command>, out_tx: 
         // Reading first and checking the length afterwards let a peer make
         // the daemon allocate any amount it liked, which is the opposite of
         // what the bound is for.
-        let read_result = (&mut reader).take(MAX_LINE_BYTES as u64 + 1).read_line(&mut line);
+        let read_result = (&mut reader)
+            .take(MAX_LINE_BYTES as u64 + 1)
+            .read_line(&mut line);
         match read_result {
             Ok(0) => return, // EOF, client closed the connection.
             Ok(bytes_read) => {
@@ -126,7 +131,11 @@ fn client_reader_loop(stream: UnixStream, command_tx: &Sender<Command>, out_tx: 
         let envelope: RequestEnvelope = match serde_json::from_str(trimmed) {
             Ok(envelope) => envelope,
             Err(parse_error) => {
-                send_protocol_error(out_tx, 0, &format!("could not parse request: {parse_error}"));
+                send_protocol_error(
+                    out_tx,
+                    0,
+                    &format!("could not parse request: {parse_error}"),
+                );
                 continue;
             }
         };
@@ -165,7 +174,10 @@ fn client_writer_loop(stream: UnixStream, out_rx: &Receiver<Outbound>) {
         // then reconnects, and then receives the same oversized line. Drop
         // it here instead of building that loop.
         if json.len() > MAX_LINE_BYTES {
-            eprintln!("server: dropping a {} byte message, over the {MAX_LINE_BYTES} byte limit", json.len());
+            eprintln!(
+                "server: dropping a {} byte message, over the {MAX_LINE_BYTES} byte limit",
+                json.len()
+            );
             continue;
         }
 

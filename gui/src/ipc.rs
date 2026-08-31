@@ -12,12 +12,19 @@ use std::{
     time::Duration,
 };
 
+use aurora_protocol::ipc::{
+    socket_path, DaemonState, Event, Request, RequestEnvelope, Response, ServerMessage,
+    MAX_LINE_BYTES, PROTOCOL_VERSION,
+};
 use crossbeam_channel::{Receiver, Sender};
-use aurora_protocol::ipc::{socket_path, DaemonState, Event, Request, RequestEnvelope, Response, ServerMessage, MAX_LINE_BYTES, PROTOCOL_VERSION};
 
 /// Delays between reconnect attempts; the last entry repeats. Fast enough
 /// that "start daemon → window comes alive" feels immediate.
-const RECONNECT_BACKOFF: [Duration; 3] = [Duration::from_millis(500), Duration::from_secs(1), Duration::from_secs(2)];
+const RECONNECT_BACKOFF: [Duration; 3] = [
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+];
 
 /// Pending writes from the GUI. Bounded: if the daemon is wedged the GUI
 /// drops updates instead of buffering forever (the last write wins anyway).
@@ -125,7 +132,11 @@ enum SessionOutcome {
 /// Runs until the connection dies. Sends Subscribe + GetState first, then
 /// pumps the write queue on this thread while a reader thread forwards
 /// server lines.
-fn serve_connection<F>(stream: UnixStream, request_rx: &Receiver<Request>, deliver: &F) -> SessionOutcome
+fn serve_connection<F>(
+    stream: UnixStream,
+    request_rx: &Receiver<Request>,
+    deliver: &F,
+) -> SessionOutcome
 where
     F: Fn(IpcUpdate) -> bool + Send + Clone + 'static,
 {
@@ -144,7 +155,9 @@ where
     let mut next_id: u64 = 1;
 
     let handshake = [
-        Request::Hello { protocol_version: PROTOCOL_VERSION },
+        Request::Hello {
+            protocol_version: PROTOCOL_VERSION,
+        },
         Request::Subscribe,
         Request::GetState,
     ];
@@ -217,7 +230,9 @@ where
     loop {
         line.clear();
 
-        let read_result = (&mut reader).take(MAX_LINE_BYTES as u64 + 1).read_line(&mut line);
+        let read_result = (&mut reader)
+            .take(MAX_LINE_BYTES as u64 + 1)
+            .read_line(&mut line);
         match read_result {
             Ok(0) => return SessionOutcome::Closed, // Daemon closed the connection.
             Ok(bytes_read) => {
@@ -258,7 +273,10 @@ where
                         return SessionOutcome::ClientGone;
                     }
                 }
-                Response::Hello { protocol_version, daemon_version } => {
+                Response::Hello {
+                    protocol_version,
+                    daemon_version,
+                } => {
                     // A mismatch is terminal. v2 moved lighting into
                     // Profile::slots, so a mismatched peer would parse
                     // state it cannot represent and send requests the other

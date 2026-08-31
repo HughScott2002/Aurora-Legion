@@ -6,10 +6,18 @@ use rand::{rngs::ThreadRng, Rng};
 use crate::engine::Inner;
 
 pub fn play(manager: &mut Inner, p: &Lighting, rng: &mut ThreadRng) {
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
         let profile_array = p.rgb_array();
 
-        if manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+        if manager
+            .stop_signals
+            .manager_stop_signal
+            .load(Ordering::SeqCst)
+        {
             break;
         }
         let zone_index = rng.random_range(0..4);

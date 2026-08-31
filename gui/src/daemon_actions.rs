@@ -131,7 +131,10 @@ fn run_systemctl(args: &[&str]) -> Option<String> {
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Some(format!("systemctl --user {} failed: {stderr}", args.join(" ")))
+    Some(format!(
+        "systemctl --user {} failed: {stderr}",
+        args.join(" ")
+    ))
 }
 
 fn read_unit_fragment_path() -> Option<String> {
@@ -152,7 +155,9 @@ fn read_unit_fragment_path() -> Option<String> {
 }
 
 fn unit_is_enabled() -> bool {
-    let output = Command::new("systemctl").args(["--user", "is-enabled", UNIT_NAME]).output();
+    let output = Command::new("systemctl")
+        .args(["--user", "is-enabled", UNIT_NAME])
+        .output();
 
     match output {
         Ok(output) => output.status.success(),

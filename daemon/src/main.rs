@@ -10,15 +10,20 @@ mod slot_watch;
 
 use std::sync::{atomic::AtomicBool, Arc};
 
-use clap::{Parser, Subcommand};
 use aurora_protocol::ipc::socket_path;
+use clap::{Parser, Subcommand};
 
 /// Commands from every source (IPC clients, hotkey) funnel into the core
 /// through one bounded queue.
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 
 #[derive(Parser)]
-#[command(author, version, about = "Aurora: Legion keyboard lighting daemon and control CLI", name = "aurora")]
+#[command(
+    author,
+    version,
+    about = "Aurora: Legion keyboard lighting daemon and control CLI",
+    name = "aurora"
+)]
 struct Cli {
     #[command(subcommand)]
     command: CliCommand,
@@ -71,7 +76,10 @@ fn run_daemon() {
     let listener = match server::bind_socket(&path) {
         server::BindOutcome::Bound(listener) => listener,
         server::BindOutcome::AlreadyRunning => {
-            eprintln!("aurora: another daemon is already running on {}", path.display());
+            eprintln!(
+                "aurora: another daemon is already running on {}",
+                path.display()
+            );
             std::process::exit(1);
         }
         server::BindOutcome::Failed(error) => {
@@ -80,7 +88,11 @@ fn run_daemon() {
         }
     };
 
-    eprintln!("aurora: daemon v{} listening on {}", env!("CARGO_PKG_VERSION"), path.display());
+    eprintln!(
+        "aurora: daemon v{} listening on {}",
+        env!("CARGO_PKG_VERSION"),
+        path.display()
+    );
 
     let (command_tx, command_rx) = crossbeam_channel::bounded(COMMAND_QUEUE_CAPACITY);
 
@@ -101,7 +113,10 @@ fn run_daemon() {
 
     let remove_result = std::fs::remove_file(&path);
     if let Err(error) = remove_result {
-        eprintln!("aurora: could not remove socket {}: {error}", path.display());
+        eprintln!(
+            "aurora: could not remove socket {}: {error}",
+            path.display()
+        );
     }
 
     eprintln!("aurora: daemon stopped");
@@ -111,7 +126,10 @@ fn run_daemon() {
 /// `recv_timeout` wakes immediately; the atomic flag from
 /// `register_shutdown_signals` stays as the backstop.
 fn spawn_signal_listener(command_tx: crossbeam_channel::Sender<core::Command>) {
-    let signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT]);
+    let signals = signal_hook::iterator::Signals::new([
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
+    ]);
 
     let mut signals = match signals {
         Ok(signals) => signals,
@@ -139,7 +157,8 @@ fn register_shutdown_signals(shutdown_flag: &Arc<AtomicBool>) {
     // flag and the SECOND signal (flag already true) force-exits a stuck
     // daemon.
     for signal in signals {
-        let register_result = signal_hook::flag::register_conditional_shutdown(signal, 1, shutdown_flag.clone());
+        let register_result =
+            signal_hook::flag::register_conditional_shutdown(signal, 1, shutdown_flag.clone());
         if let Err(error) = register_result {
             eprintln!("aurora: could not register forced shutdown for signal {signal}: {error}");
         }

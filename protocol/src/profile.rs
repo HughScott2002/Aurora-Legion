@@ -113,11 +113,8 @@ pub struct Profile {
 
 /// Slot colors a fresh profile starts with, so cycling with Fn+Space shows
 /// which slot is active without reading any status output.
-pub const DEFAULT_SLOT_COLORS: [[u8; COLOR_CHANNELS_PER_ZONE]; SLOT_COUNT] = [
-    [255, 0, 0],
-    [0, 255, 0],
-    [0, 0, 255],
-];
+pub const DEFAULT_SLOT_COLORS: [[u8; COLOR_CHANNELS_PER_ZONE]; SLOT_COUNT] =
+    [[255, 0, 0], [0, 255, 0], [0, 0, 255]];
 
 impl Default for Profile {
     fn default() -> Self {
@@ -206,7 +203,8 @@ impl Profile {
         }
 
         let contents = std::fs::read_to_string(path).change_context(LoadProfileError)?;
-        let legacy: LegacyProfileFile = serde_json::from_str(&contents).change_context(LoadProfileError)?;
+        let legacy: LegacyProfileFile =
+            serde_json::from_str(&contents).change_context(LoadProfileError)?;
 
         Ok(legacy.into_profile())
     }
@@ -241,9 +239,18 @@ mod tests {
     fn default_profile_slots_are_red_green_blue() {
         let profile = Profile::default();
 
-        assert_eq!(profile.slots[0].rgb_array(), [255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0]);
-        assert_eq!(profile.slots[1].rgb_array(), [0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0]);
-        assert_eq!(profile.slots[2].rgb_array(), [0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255]);
+        assert_eq!(
+            profile.slots[0].rgb_array(),
+            [255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0]
+        );
+        assert_eq!(
+            profile.slots[1].rgb_array(),
+            [0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0]
+        );
+        assert_eq!(
+            profile.slots[2].rgb_array(),
+            [0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255]
+        );
     }
 
     /// A profile file from 0.23 or earlier must still load, or users lose
@@ -264,7 +271,8 @@ mod tests {
             "brightness": "High"
         }"#;
 
-        let parsed: LegacyProfileFile = serde_json::from_str(legacy).expect("legacy file should parse");
+        let parsed: LegacyProfileFile =
+            serde_json::from_str(legacy).expect("legacy file should parse");
         let profile = parsed.into_profile();
 
         assert_eq!(profile.name.as_deref(), Some("old"));
@@ -296,11 +304,17 @@ mod tests {
     #[test]
     fn lighting_equality_sees_inner_effect_settings() {
         let slow = Lighting {
-            effect: Effects::AmbientLight { fps: 10, saturation_boost: 0.0 },
+            effect: Effects::AmbientLight {
+                fps: 10,
+                saturation_boost: 0.0,
+            },
             ..Default::default()
         };
         let fast = Lighting {
-            effect: Effects::AmbientLight { fps: 60, saturation_boost: 0.0 },
+            effect: Effects::AmbientLight {
+                fps: 60,
+                saturation_boost: 0.0,
+            },
             ..Default::default()
         };
 

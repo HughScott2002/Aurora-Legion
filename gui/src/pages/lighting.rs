@@ -114,7 +114,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         if !button.is_active() {
             return;
         }
-        off_sender.input(AppMsg::SlotSelected { slot: SlotSelection::Off });
+        off_sender.input(AppMsg::SlotSelected {
+            slot: SlotSelection::Off,
+        });
     });
     slot_box.append(&off_button);
 
@@ -130,7 +132,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
             if !button.is_active() {
                 return; // The group deactivates the previous button too.
             }
-            slot_sender.input(AppMsg::SlotSelected { slot: selected_slot });
+            slot_sender.input(AppMsg::SlotSelected {
+                slot: selected_slot,
+            });
         });
 
         // One group, so the buttons behave as a picker rather than four
@@ -271,7 +275,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     brightness_row.set_title("High Brightness");
     let brightness_sender = sender.clone();
     brightness_row.connect_active_notify(move |row| {
-        brightness_sender.input(AppMsg::BrightnessPicked { high: row.is_active() });
+        brightness_sender.input(AppMsg::BrightnessPicked {
+            high: row.is_active(),
+        });
     });
     options_group.add(&brightness_row);
 
@@ -284,7 +290,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     direction_row.connect_selected_notify(move |row| {
         let index = row.selected();
         if index != gtk::INVALID_LIST_POSITION {
-            direction_sender.input(AppMsg::DirectionPicked { index: index as usize });
+            direction_sender.input(AppMsg::DirectionPicked {
+                index: index as usize,
+            });
         }
     });
     options_group.add(&direction_row);
@@ -331,7 +339,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     swipe_mode_row.connect_selected_notify(move |row| {
         let index = row.selected();
         if index != gtk::INVALID_LIST_POSITION {
-            swipe_sender.input(AppMsg::SwipeModePicked { index: index as usize });
+            swipe_sender.input(AppMsg::SwipeModePicked {
+                index: index as usize,
+            });
         }
     });
     swipe_group.add(&swipe_mode_row);
@@ -344,7 +354,9 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     clean_row.set_visible(false);
     let clean_sender = sender.clone();
     clean_row.connect_active_notify(move |row| {
-        clean_sender.input(AppMsg::CleanWithBlackPicked { clean: row.is_active() });
+        clean_sender.input(AppMsg::CleanWithBlackPicked {
+            clean: row.is_active(),
+        });
     });
     swipe_group.add(&clean_row);
 
@@ -489,5 +501,10 @@ pub fn rgba_to_bytes(rgba: &gdk::RGBA) -> [u8; 3] {
 }
 
 pub fn bytes_to_rgba(color: [u8; 3]) -> gdk::RGBA {
-    gdk::RGBA::new(f32::from(color[0]) / 255.0, f32::from(color[1]) / 255.0, f32::from(color[2]) / 255.0, 1.0)
+    gdk::RGBA::new(
+        f32::from(color[0]) / 255.0,
+        f32::from(color[1]) / 255.0,
+        f32::from(color[2]) / 255.0,
+        1.0,
+    )
 }

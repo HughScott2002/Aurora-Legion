@@ -3,8 +3,7 @@
 use aurora_protocol::ipc::CustomEffectSummary;
 use relm4::{
     adw::{self, prelude::*},
-    gtk,
-    ComponentSender,
+    gtk, ComponentSender,
 };
 
 use crate::app::{App, AppMsg};
@@ -83,7 +82,12 @@ pub fn build(sender: &ComponentSender<App>) -> CustomEffectsPage {
 }
 
 impl CustomEffectsPage {
-    pub fn sync(&mut self, effects: &[CustomEffectSummary], playing: Option<&str>, sender: &ComponentSender<App>) {
+    pub fn sync(
+        &mut self,
+        effects: &[CustomEffectSummary],
+        playing: Option<&str>,
+        sender: &ComponentSender<App>,
+    ) {
         match playing {
             Some(name) => {
                 self.stop_row.set_title(&format!("Playing “{name}”"));
@@ -117,7 +121,9 @@ impl CustomEffectsPage {
             let play_sender = sender.clone();
             let play_name = name.clone();
             row.connect_activated(move |_| {
-                play_sender.input(AppMsg::CustomEffectPlayed { name: play_name.clone() });
+                play_sender.input(AppMsg::CustomEffectPlayed {
+                    name: play_name.clone(),
+                });
             });
 
             let delete_button = gtk::Button::from_icon_name("user-trash-symbolic");
@@ -127,7 +133,9 @@ impl CustomEffectsPage {
             let delete_sender = sender.clone();
             let delete_name = name.clone();
             delete_button.connect_clicked(move |_| {
-                delete_sender.input(AppMsg::CustomEffectDeleted { name: delete_name.clone() });
+                delete_sender.input(AppMsg::CustomEffectDeleted {
+                    name: delete_name.clone(),
+                });
             });
             row.add_suffix(&delete_button);
 

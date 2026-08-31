@@ -7,13 +7,13 @@
 //! - driver errors are recorded instead of unwrapped, so an unplugged
 //!   keyboard degrades into re-acquisition instead of a dead thread.
 
-use crossbeam_channel::{Receiver, Sender};
 use aurora_protocol::{
     custom_effect::{CustomEffect, EffectType},
     effects::{Direction, Effects},
     ipc::{Subsystem, SubsystemState},
     profile::{self, Lighting, COLOR_BYTE_COUNT},
 };
+use crossbeam_channel::{Receiver, Sender};
 
 use crate::core::Command;
 use legion_rgb_driver::{BaseEffects, Keyboard, SPEED_RANGE};
@@ -68,7 +68,11 @@ struct Inner {
 impl EffectManager {
     /// Takes an already-acquired keyboard. Acquisition (with retry and error
     /// classification) lives in `crate::keyboard`, not here.
-    pub fn new(keyboard: Keyboard, stop_signals: StopSignals, command_tx: Option<Sender<Command>>) -> Self {
+    pub fn new(
+        keyboard: Keyboard,
+        stop_signals: StopSignals,
+        command_tx: Option<Sender<Command>>,
+    ) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<Message>(MESSAGE_QUEUE_CAPACITY);
         let device_error = Arc::new(AtomicBool::new(false));
 
@@ -189,7 +193,12 @@ impl Inner {
             let clamped_speed = clamp_hardware_speed(lighting.speed);
             let brightness_payload = lighting.brightness as u8 + 1;
             let colors = lighting.rgb_array();
-            if !self.write_hardware_profile(hardware_effect, clamped_speed, brightness_payload, colors) {
+            if !self.write_hardware_profile(
+                hardware_effect,
+                clamped_speed,
+                brightness_payload,
+                colors,
+            ) {
                 return;
             }
             self.stop_signals.store_false();
@@ -249,18 +258,28 @@ impl Inner {
                 self.write_effect(effect);
             }
             Effects::Lightning => effects::lightning::play(self, lighting, rng),
-            Effects::AmbientLight { mut fps, mut saturation_boost } => {
+            Effects::AmbientLight {
+                mut fps,
+                mut saturation_boost,
+            } => {
                 fps = fps.clamp(1, 60);
                 saturation_boost = saturation_boost.clamp(0.0, 1.0);
                 effects::ambient::play(self, fps, saturation_boost);
                 // play() returns when the effect is replaced or stopped.
                 self.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Inactive);
             }
-            Effects::SmoothWave { mode, clean_with_black } => {
-                lighting.rgb_zones = profile::arr_to_zones([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 255]);
+            Effects::SmoothWave {
+                mode,
+                clean_with_black,
+            } => {
+                lighting.rgb_zones =
+                    profile::arr_to_zones([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 255]);
                 effects::swipe::play(self, lighting, mode, clean_with_black);
             }
-            Effects::Swipe { mode, clean_with_black } => effects::swipe::play(self, lighting, mode, clean_with_black),
+            Effects::Swipe {
+                mode,
+                clean_with_black,
+            } => effects::swipe::play(self, lighting, mode, clean_with_black),
             Effects::Disco => effects::disco::play(self, lighting, rng),
             Effects::Christmas => effects::christmas::play(self, rng),
             Effects::Fade => effects::fade::play(self, lighting),
@@ -280,7 +299,9 @@ impl Inner {
 
                 let step_written = match step.step_type {
                     EffectType::Set => self.write_colors(&step.rgb_array),
-                    EffectType::Transition => self.write_transition(&step.rgb_array, step.steps, step.delay_between_steps),
+                    EffectType::Transition => {
+                        self.write_transition(&step.rgb_array, step.steps, step.delay_between_steps)
+                    }
                 };
                 if !step_written {
                     return;
@@ -328,7 +349,10 @@ impl Inner {
         colors: [u8; COLOR_BYTE_COUNT],
     ) -> bool {
         debug_assert!(SPEED_RANGE.contains(&speed));
-        match self.keyboard.apply_hardware_profile(effect, speed, brightness, colors) {
+        match self
+            .keyboard
+            .apply_hardware_profile(effect, speed, brightness, colors)
+        {
             Ok(()) => true,
             Err(error) => {
                 self.record_device_error("apply_hardware_profile", &error);
@@ -377,8 +401,16 @@ impl Inner {
         }
     }
 
-    fn write_transition(&mut self, colors: &[u8; COLOR_BYTE_COUNT], steps: u8, delay_between_steps_ms: u64) -> bool {
-        match self.keyboard.transition_colors_to(colors, steps, delay_between_steps_ms) {
+    fn write_transition(
+        &mut self,
+        colors: &[u8; COLOR_BYTE_COUNT],
+        steps: u8,
+        delay_between_steps_ms: u64,
+    ) -> bool {
+        match self
+            .keyboard
+            .transition_colors_to(colors, steps, delay_between_steps_ms)
+        {
             Ok(()) => true,
             Err(error) => {
                 self.record_device_error("transition_colors_to", &error);

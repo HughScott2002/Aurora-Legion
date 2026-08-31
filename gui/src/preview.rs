@@ -68,7 +68,12 @@ impl KeyboardPreview {
     }
 }
 
-fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u8; 3]; ZONE_COUNT]) {
+fn draw_keyboard(
+    context: &cairo::Context,
+    width: f64,
+    height: f64,
+    colors: &[[u8; 3]; ZONE_COUNT],
+) {
     // The laptop deck: always dark, independent of the GTK theme, because
     // it depicts the physical keyboard.
     context.set_source_rgb(0.075, 0.075, 0.09);
@@ -96,7 +101,8 @@ fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u
         let center_y = grid_top + grid_height / 2.0;
         let glow_radius = zone_width * 0.85;
 
-        let gradient = cairo::RadialGradient::new(center_x, center_y, 4.0, center_x, center_y, glow_radius);
+        let gradient =
+            cairo::RadialGradient::new(center_x, center_y, 4.0, center_x, center_y, glow_radius);
         gradient.add_color_stop_rgba(0.0, red, green, blue, 0.8);
         gradient.add_color_stop_rgba(1.0, red, green, blue, 0.05);
         if context.set_source(&gradient).is_err() {
@@ -120,10 +126,15 @@ fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u
         let mut column_index = 0;
         while column_index < KEY_COLUMNS {
             // Spacebar: columns 5..=10 of the bottom row as one wide key.
-            let spanned_columns = if is_bottom_row && column_index == 5 { 6 } else { 1 };
+            let spanned_columns = if is_bottom_row && column_index == 5 {
+                6
+            } else {
+                1
+            };
 
             let key_x = grid_left + column_index as f64 * (column_width + KEY_GAP_PX);
-            let key_width = column_width * spanned_columns as f64 + KEY_GAP_PX * (spanned_columns as f64 - 1.0);
+            let key_width =
+                column_width * spanned_columns as f64 + KEY_GAP_PX * (spanned_columns as f64 - 1.0);
 
             let key_center_x = key_x + key_width / 2.0;
             let zone_index = zone_index_for_x(key_center_x, &zone_bounds);
@@ -131,7 +142,14 @@ fn draw_keyboard(context: &cairo::Context, width: f64, height: f64, colors: &[[u
 
             // Keycap surface: the zone color over a dark cap, so black
             // zones show unlit dark keys instead of vanishing.
-            rounded_rectangle(context, key_x, key_y, key_width, row_height, KEY_CORNER_RADIUS_PX);
+            rounded_rectangle(
+                context,
+                key_x,
+                key_y,
+                key_width,
+                row_height,
+                KEY_CORNER_RADIUS_PX,
+            );
             context.set_source_rgb(0.12 + red * 0.75, 0.12 + green * 0.75, 0.12 + blue * 0.75);
             if context.fill().is_err() {
                 return;
@@ -179,13 +197,38 @@ fn color_to_rgb_f64(color: &[u8; 3]) -> (f64, f64, f64) {
     (red, green, blue)
 }
 
-fn rounded_rectangle(context: &cairo::Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
+fn rounded_rectangle(
+    context: &cairo::Context,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+) {
     let degrees = std::f64::consts::PI / 180.0;
 
     context.new_sub_path();
     context.arc(x + width - radius, y + radius, radius, -90.0 * degrees, 0.0);
-    context.arc(x + width - radius, y + height - radius, radius, 0.0, 90.0 * degrees);
-    context.arc(x + radius, y + height - radius, radius, 90.0 * degrees, 180.0 * degrees);
-    context.arc(x + radius, y + radius, radius, 180.0 * degrees, 270.0 * degrees);
+    context.arc(
+        x + width - radius,
+        y + height - radius,
+        radius,
+        0.0,
+        90.0 * degrees,
+    );
+    context.arc(
+        x + radius,
+        y + height - radius,
+        radius,
+        90.0 * degrees,
+        180.0 * degrees,
+    );
+    context.arc(
+        x + radius,
+        y + radius,
+        radius,
+        180.0 * degrees,
+        270.0 * degrees,
+    );
     context.close_path();
 }

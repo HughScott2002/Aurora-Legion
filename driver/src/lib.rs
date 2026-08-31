@@ -91,10 +91,16 @@ pub struct LightingState {
 impl LightingState {
     fn build_payload(&self) -> Result<[u8; FEATURE_REPORT_BYTES]> {
         if !SPEED_RANGE.contains(&self.speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Speed,
+            }
+            .into());
         }
         if !BRIGHTNESS_RANGE.contains(&self.brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Brightness,
+            }
+            .into());
         }
 
         let mut payload: [u8; FEATURE_REPORT_BYTES] = [0; FEATURE_REPORT_BYTES];
@@ -125,12 +131,24 @@ impl LightingState {
         Ok(payload)
     }
 
-    fn replace_profile(&mut self, effect: BaseEffects, speed: u8, brightness: u8, rgb_values: [u8; 12]) -> Result<()> {
+    fn replace_profile(
+        &mut self,
+        effect: BaseEffects,
+        speed: u8,
+        brightness: u8,
+        rgb_values: [u8; 12],
+    ) -> Result<()> {
         if !SPEED_RANGE.contains(&speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Speed,
+            }
+            .into());
         }
         if !BRIGHTNESS_RANGE.contains(&brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Brightness,
+            }
+            .into());
         }
 
         self.effect_type = effect;
@@ -162,7 +180,10 @@ fn lock_hid_device(device: &SharedHidDevice) -> MutexGuard<'_, HidDevice> {
 /// session shows exactly what Aurora sent and when. This is the only
 /// evidence that separates "Aurora never wrote" from "Aurora wrote and the
 /// controller overwrote it afterwards".
-fn trace_feature_report(payload: &[u8; FEATURE_REPORT_BYTES], send_result: &std::result::Result<(), hidapi::HidError>) {
+fn trace_feature_report(
+    payload: &[u8; FEATURE_REPORT_BYTES],
+    send_result: &std::result::Result<(), hidapi::HidError>,
+) {
     let is_failure = send_result.is_err();
     let Some(suppressed_count) = claim_trace_slot(is_failure) else {
         return;
@@ -259,7 +280,8 @@ impl Keyboard {
         brightness: u8,
         rgb_values: [u8; 12],
     ) -> Result<()> {
-        self.current_state.replace_profile(effect, speed, brightness, rgb_values)?;
+        self.current_state
+            .replace_profile(effect, speed, brightness, rgb_values)?;
         self.refresh()
     }
 
@@ -280,7 +302,10 @@ impl Keyboard {
 
     pub fn set_speed(&mut self, speed: u8) -> Result<()> {
         if !SPEED_RANGE.contains(&speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Speed,
+            }
+            .into());
         }
 
         self.current_state.speed = speed;
@@ -291,9 +316,15 @@ impl Keyboard {
 
     pub fn set_brightness(&mut self, brightness: u8) -> Result<()> {
         if !BRIGHTNESS_RANGE.contains(&brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Brightness,
+            }
+            .into());
         }
-        let brightness = brightness.clamp(BRIGHTNESS_RANGE.min().unwrap(), BRIGHTNESS_RANGE.max().unwrap());
+        let brightness = brightness.clamp(
+            BRIGHTNESS_RANGE.min().unwrap(),
+            BRIGHTNESS_RANGE.max().unwrap(),
+        );
         self.current_state.brightness = brightness;
         self.refresh()?;
 
@@ -302,7 +333,10 @@ impl Keyboard {
 
     pub fn set_zone_by_index(&mut self, zone_index: u8, new_values: [u8; 3]) -> Result<()> {
         if !ZONE_RANGE.contains(&zone_index) {
-            return Err(RangeError { kind: RangeErrorKind::Zone }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Zone,
+            }
+            .into());
         }
 
         for (i, _) in new_values.iter().enumerate() {
@@ -338,12 +372,19 @@ impl Keyboard {
         Ok(())
     }
 
-    pub fn transition_colors_to(&mut self, target_colors: &[u8; 12], steps: u8, delay_between_steps: u64) -> Result<()> {
+    pub fn transition_colors_to(
+        &mut self,
+        target_colors: &[u8; 12],
+        steps: u8,
+        delay_between_steps: u64,
+    ) -> Result<()> {
         if let BaseEffects::Static | BaseEffects::Breath = self.current_state.effect_type {
             let mut new_values = self.current_state.rgb_values.map(f32::from);
             let mut color_differences: [f32; 12] = [0.0; 12];
             for index in 0..12 {
-                color_differences[index] = (f32::from(target_colors[index]) - f32::from(self.current_state.rgb_values[index])) / f32::from(steps);
+                color_differences[index] = (f32::from(target_colors[index])
+                    - f32::from(self.current_state.rgb_values[index]))
+                    / f32::from(steps);
             }
             if !self.stop_signal.load(Ordering::SeqCst) {
                 for _step_num in 1..=steps {
@@ -380,7 +421,9 @@ fn find_known_device(api: &HidApi) -> Result<&hidapi::DeviceInfo> {
             {
                 let info_tuple = (d.vendor_id(), d.product_id());
 
-                KNOWN_DEVICE_INFOS.iter().any(|known| (known.0, known.1) == info_tuple)
+                KNOWN_DEVICE_INFOS
+                    .iter()
+                    .any(|known| (known.0, known.1) == info_tuple)
             }
         })
         .ok_or(error::Error::DeviceNotFound)
@@ -410,7 +453,10 @@ impl SlotReader {
             device.get_feature_report(&mut report)?
         };
         if read_count < 2 {
-            return Err(RangeError { kind: RangeErrorKind::Slot }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Slot,
+            }
+            .into());
         }
 
         Ok(report[1])
@@ -473,6 +519,9 @@ mod tests {
             Ok(payload) => payload,
             Err(error) => panic!("complete profile should build: {error}"),
         };
-        assert_eq!(&payload[..17], &[0xcc, 0x16, 0x03, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(
+            &payload[..17],
+            &[0xcc, 0x16, 0x03, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        );
     }
 }

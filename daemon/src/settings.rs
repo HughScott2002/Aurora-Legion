@@ -92,13 +92,20 @@ impl Settings {
         }
 
         let Some(legacy_path) = find_legacy_settings_file() else {
-            eprintln!("settings: no settings file found, starting fresh at {}", path.display());
+            eprintln!(
+                "settings: no settings file found, starting fresh at {}",
+                path.display()
+            );
             return Self::default();
         };
 
         // Migrating from a different path leaves the original untouched, so
         // no backup is needed here.
-        eprintln!("settings: migrating settings from {} to {}", legacy_path.display(), path.display());
+        eprintln!(
+            "settings: migrating settings from {} to {}",
+            legacy_path.display(),
+            path.display()
+        );
         let mut settings = Self::load_from(&legacy_path);
         settings.save_blocked = None;
         let save_result = settings.save_to(&path);
@@ -130,14 +137,17 @@ impl Settings {
         }
 
         // v1: a flat profile plus a separate per-slot list.
-        let legacy_result: Result<LegacySettings, serde_json::Error> = serde_json::from_str(&contents);
+        let legacy_result: Result<LegacySettings, serde_json::Error> =
+            serde_json::from_str(&contents);
         let legacy = match legacy_result {
             Ok(legacy) => legacy,
             Err(error) => {
                 let reason = format!("could not parse {}: {error}", path.display());
                 eprintln!("settings: {reason}");
                 preserve_corrupt_file(path);
-                eprintln!("settings: refusing to overwrite it; this session will not save settings");
+                eprintln!(
+                    "settings: refusing to overwrite it; this session will not save settings"
+                );
                 return Self {
                     save_blocked: Some(reason),
                     ..Self::default()
@@ -157,7 +167,9 @@ impl Settings {
                 // irreversible step in this whole path. Do not take it.
                 let reason = format!("could not back up the v1 settings file: {message}");
                 eprintln!("settings: {reason}");
-                eprintln!("settings: converting in memory only; this session will not save settings");
+                eprintln!(
+                    "settings: converting in memory only; this session will not save settings"
+                );
                 let mut settings = legacy.into_settings();
                 settings.save_blocked = Some(reason);
                 return settings;
@@ -225,7 +237,10 @@ impl Settings {
 
         let rename_result = fs::rename(&temp_path, path);
         if let Err(error) = rename_result {
-            return Err(format!("could not move {} into place: {error}", temp_path.display()));
+            return Err(format!(
+                "could not move {} into place: {error}",
+                temp_path.display()
+            ));
         }
 
         Ok(())
@@ -266,7 +281,10 @@ fn preserve_corrupt_file(path: &Path) {
     let backup_path = path.with_extension("json.invalid");
     let copy_result = fs::copy(path, &backup_path);
     match copy_result {
-        Ok(_) => eprintln!("settings: kept the unparseable file at {}", backup_path.display()),
+        Ok(_) => eprintln!(
+            "settings: kept the unparseable file at {}",
+            backup_path.display()
+        ),
         Err(error) => eprintln!("settings: could not back up the unparseable file: {error}"),
     }
 }
@@ -337,7 +355,10 @@ impl LegacySettings {
             *slot = slot_lightings[slot_index].clone();
         }
 
-        let current_profile = Profile { name: live_name, slots };
+        let current_profile = Profile {
+            name: live_name,
+            slots,
+        };
 
         // v1 never recorded which slot was live. The live lighting usually
         // matches exactly one slot, which recovers it; otherwise start at
@@ -451,9 +472,18 @@ mod tests {
     fn v1_slot_lighting_becomes_the_live_profile_slots() {
         let settings = parse_v1(&v1_json_with_slots());
 
-        assert_eq!(settings.current_profile.slots[0].rgb_array()[..3], [255, 0, 0]);
-        assert_eq!(settings.current_profile.slots[1].rgb_array()[..3], [0, 255, 0]);
-        assert_eq!(settings.current_profile.slots[2].rgb_array()[..3], [0, 0, 255]);
+        assert_eq!(
+            settings.current_profile.slots[0].rgb_array()[..3],
+            [255, 0, 0]
+        );
+        assert_eq!(
+            settings.current_profile.slots[1].rgb_array()[..3],
+            [0, 255, 0]
+        );
+        assert_eq!(
+            settings.current_profile.slots[2].rgb_array()[..3],
+            [0, 0, 255]
+        );
         assert_eq!(settings.current_profile.name.as_deref(), Some("live"));
     }
 
@@ -524,9 +554,18 @@ mod tests {
         }"#;
 
         let settings = parse_v1(json);
-        assert_eq!(settings.current_profile.slots[0].rgb_array()[..3], [2, 2, 2]);
-        assert_eq!(settings.current_profile.slots[1].rgb_array()[..3], [1, 1, 1]);
-        assert_eq!(settings.current_profile.slots[2].rgb_array()[..3], [1, 1, 1]);
+        assert_eq!(
+            settings.current_profile.slots[0].rgb_array()[..3],
+            [2, 2, 2]
+        );
+        assert_eq!(
+            settings.current_profile.slots[1].rgb_array()[..3],
+            [1, 1, 1]
+        );
+        assert_eq!(
+            settings.current_profile.slots[2].rgb_array()[..3],
+            [1, 1, 1]
+        );
     }
 
     /// More slots than the hardware has must not panic or silently shift
@@ -541,8 +580,14 @@ mod tests {
 
         let settings = parse_v1(&json.to_string());
         assert_eq!(settings.current_profile.slots.len(), SLOT_COUNT);
-        assert_eq!(settings.current_profile.slots[0].rgb_array()[..3], [255, 0, 0]);
-        assert_eq!(settings.current_profile.slots[2].rgb_array()[..3], [0, 0, 255]);
+        assert_eq!(
+            settings.current_profile.slots[0].rgb_array()[..3],
+            [255, 0, 0]
+        );
+        assert_eq!(
+            settings.current_profile.slots[2].rgb_array()[..3],
+            [0, 0, 255]
+        );
     }
 
     /// The destructive path. An unparseable file must leave the daemon
@@ -573,7 +618,10 @@ mod tests {
 
         assert_eq!(parsed.active_slot, SlotSelection::Third);
         assert_eq!(parsed.current_profile, settings.current_profile);
-        assert!(parsed.save_blocked.is_none(), "the block flag must not travel through the file");
+        assert!(
+            parsed.save_blocked.is_none(),
+            "the block flag must not travel through the file"
+        );
     }
 
     /// A v2 file must not be re-migrated: v1 parsing is only reached when

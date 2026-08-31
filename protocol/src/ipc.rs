@@ -60,7 +60,11 @@ pub enum SlotSelection {
 }
 
 /// The lit slots, in the order Fn+Space walks them.
-pub const LIT_SLOTS: [SlotSelection; SLOT_COUNT] = [SlotSelection::First, SlotSelection::Second, SlotSelection::Third];
+pub const LIT_SLOTS: [SlotSelection; SLOT_COUNT] = [
+    SlotSelection::First,
+    SlotSelection::Second,
+    SlotSelection::Third,
+];
 
 /// Counter value the controller reports while the backlight is off.
 const SLOT_COUNTER_OFF: u8 = 4;
@@ -148,39 +152,62 @@ pub enum Request {
     /// answers [`Response::Hello`]. A daemon too old to know this request
     /// answers `Error { kind: InvalidRequest }` instead, which clients
     /// should report as a version mismatch, not a protocol failure.
-    Hello { protocol_version: u32 },
+    Hello {
+        protocol_version: u32,
+    },
     /// Return the full daemon state.
     GetState,
     /// Make `profile` the live profile, all slots at once, and apply the
     /// active slot. Stops any playing custom effect.
-    SetProfile { profile: Profile },
+    SetProfile {
+        profile: Profile,
+    },
     /// Replace one slot's lighting in the live profile. `slot` of `None`
     /// targets whichever slot is active. Targeting [`SlotSelection::Off`]
     /// is rejected: off holds no lighting.
-    SetLighting { slot: Option<SlotSelection>, lighting: Lighting },
+    SetLighting {
+        slot: Option<SlotSelection>,
+        lighting: Lighting,
+    },
     /// Make `slot` the live position and apply it. This moves Aurora's own
     /// slot number, the same one Fn+Space moves; it cannot drive the
     /// controller's counter, because no such command exists on this
     /// hardware.
-    SelectSlot { slot: SlotSelection },
+    SelectSlot {
+        slot: SlotSelection,
+    },
     /// Start playing a custom effect until stopped or replaced.
-    PlayCustomEffect { effect: CustomEffect },
+    PlayCustomEffect {
+        effect: CustomEffect,
+    },
     /// Play a saved custom effect by name. Clients that already received a
     /// [`CustomEffectSummary`] use this instead of sending the body back to
     /// the daemon that stored it.
-    PlayCustomEffectByName { name: String },
+    PlayCustomEffectByName {
+        name: String,
+    },
     /// Stop the playing custom effect and re-apply the active slot.
     StopCustomEffect,
     /// Save a named profile. Overwrites a saved profile with the same name.
-    AddProfile { profile: Profile },
-    DeleteProfile { name: String },
+    AddProfile {
+        profile: Profile,
+    },
+    DeleteProfile {
+        name: String,
+    },
     /// Make the saved profile called `name` the live profile.
-    SwitchProfile { name: String },
+    SwitchProfile {
+        name: String,
+    },
     /// Advance to the next saved profile (wraps around).
     CycleProfile,
     /// Save a named custom effect. Overwrites one with the same name.
-    AddCustomEffect { effect: CustomEffect },
-    DeleteCustomEffect { name: String },
+    AddCustomEffect {
+        effect: CustomEffect,
+    },
+    DeleteCustomEffect {
+        name: String,
+    },
     /// Receive a [`Event::StateChanged`] line on this connection whenever
     /// the daemon state changes.
     Subscribe,
@@ -207,10 +234,18 @@ pub enum Response {
     /// [`PROTOCOL_VERSION`]; `daemon_version` is its package version.
     /// The daemon answers regardless of the client's version (and logs a
     /// warning on mismatch); enforcement is the client's call.
-    Hello { protocol_version: u32, daemon_version: String },
+    Hello {
+        protocol_version: u32,
+        daemon_version: String,
+    },
     Ok,
-    State { state: DaemonState },
-    Error { kind: ErrorKind, message: String },
+    State {
+        state: DaemonState,
+    },
+    Error {
+        kind: ErrorKind,
+        message: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,7 +390,9 @@ mod tests {
             current: Profile::default(),
             active_slot: SlotSelection::Second,
             custom_effect_playing: Some("pulse".to_string()),
-            profiles: vec![ProfileSummary { name: "gaming".to_string() }],
+            profiles: vec![ProfileSummary {
+                name: "gaming".to_string(),
+            }],
             custom_effects: vec![CustomEffectSummary {
                 name: "pulse".to_string(),
                 step_count: 12,
@@ -375,7 +412,9 @@ mod tests {
     fn request_round_trips() {
         let request = RequestEnvelope {
             id: 7,
-            req: Request::SetProfile { profile: Profile::default() },
+            req: Request::SetProfile {
+                profile: Profile::default(),
+            },
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -387,7 +426,9 @@ mod tests {
     fn response_round_trips() {
         let response = ResponseEnvelope {
             id: 7,
-            resp: Response::State { state: sample_state() },
+            resp: Response::State {
+                state: sample_state(),
+            },
         };
 
         let json = serde_json::to_string(&response).unwrap();
@@ -397,9 +438,15 @@ mod tests {
 
     #[test]
     fn server_message_demuxes_responses_and_events() {
-        let response_json = serde_json::to_string(&ResponseEnvelope { id: 1, resp: Response::Ok }).unwrap();
+        let response_json = serde_json::to_string(&ResponseEnvelope {
+            id: 1,
+            resp: Response::Ok,
+        })
+        .unwrap();
         let event_json = serde_json::to_string(&EventEnvelope {
-            event: Event::StateChanged { state: sample_state() },
+            event: Event::StateChanged {
+                state: sample_state(),
+            },
         })
         .unwrap();
 
@@ -433,7 +480,12 @@ mod tests {
     #[test]
     fn slot_selection_cycles_three_lit_then_off() {
         let mut slot = SlotSelection::First;
-        let expected = [SlotSelection::Second, SlotSelection::Third, SlotSelection::Off, SlotSelection::First];
+        let expected = [
+            SlotSelection::Second,
+            SlotSelection::Third,
+            SlotSelection::Off,
+            SlotSelection::First,
+        ];
 
         for expected_slot in expected {
             slot = slot.next();
@@ -469,7 +521,9 @@ mod tests {
     fn hello_round_trips() {
         let request = RequestEnvelope {
             id: 1,
-            req: Request::Hello { protocol_version: PROTOCOL_VERSION },
+            req: Request::Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
         };
         let response = ResponseEnvelope {
             id: 1,
@@ -511,7 +565,12 @@ mod tests {
     fn v1_hello_still_parses_so_mismatch_is_reportable() {
         let json = r#"{"id":1,"req":{"type":"Hello","protocol_version":1}}"#;
         let parsed: RequestEnvelope = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.req, Request::Hello { protocol_version: 1 });
+        assert_eq!(
+            parsed.req,
+            Request::Hello {
+                protocol_version: 1
+            }
+        );
         assert_ne!(PROTOCOL_VERSION, 1, "v2 is the current version");
     }
 }

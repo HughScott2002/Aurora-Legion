@@ -23,7 +23,8 @@ pub fn spawn(command_tx: Sender<Command>) {
         let state = match panic::catch_unwind(DeviceState::new) {
             Ok(state) => state,
             Err(_) => {
-                let reason = "no display connection; device_query needs X11 or XWayland".to_string();
+                let reason =
+                    "no display connection; device_query needs X11 or XWayland".to_string();
                 eprintln!("hotkey: {reason}, Meta+RAlt cycling disabled");
                 let _ = command_tx.send(Command::SubsystemStatus {
                     subsystem: Subsystem::Hotkey,

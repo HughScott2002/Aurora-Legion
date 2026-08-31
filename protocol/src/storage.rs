@@ -29,7 +29,8 @@ where
 
         let stringified_json = serde_json::to_string(&self).change_context(SaveFileError)?;
 
-        file.write_all(stringified_json.as_bytes()).change_context(SaveFileError)?;
+        file.write_all(stringified_json.as_bytes())
+            .change_context(SaveFileError)?;
 
         Ok(())
     }

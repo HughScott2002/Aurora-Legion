@@ -8,8 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 use aurora_protocol::profile::Lighting;
+use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 
 use crate::engine::{effects::zones::KEY_ZONES, Inner};
 
@@ -41,12 +41,15 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
         // Do this in order to avoid having to store the event handler struct somewhere,
         // since it saves no data and serves only as a fancy function proxy for interacting with the real event loop
         // This keeps the effect self contained, and other effects should probably use the same pattern
-        let event_handler = DeviceEventsHandler::new(Duration::from_millis(10)).unwrap_or(DeviceEventsHandler {});
+        let event_handler =
+            DeviceEventsHandler::new(Duration::from_millis(10)).unwrap_or(DeviceEventsHandler {});
 
         let tx_clone = tx.clone();
 
         let press_guard = event_handler.on_key_down(move |key| {
-            stop_signals.keyboard_stop_signal.store(true, Ordering::SeqCst);
+            stop_signals
+                .keyboard_stop_signal
+                .store(true, Ordering::SeqCst);
 
             let _ = tx_clone.try_send(Event::KeyPress(*key));
         });
@@ -66,12 +69,26 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
         }
     });
 
-    let mut zone_pressed: [HashSet<Keycode>; 4] = [HashSet::new(), HashSet::new(), HashSet::new(), HashSet::new()];
-    let mut zone_state: [RippleMove; 4] = [RippleMove::Off, RippleMove::Off, RippleMove::Off, RippleMove::Off];
+    let mut zone_pressed: [HashSet<Keycode>; 4] = [
+        HashSet::new(),
+        HashSet::new(),
+        HashSet::new(),
+        HashSet::new(),
+    ];
+    let mut zone_state: [RippleMove; 4] = [
+        RippleMove::Off,
+        RippleMove::Off,
+        RippleMove::Off,
+        RippleMove::Off,
+    ];
 
     let mut last_step_time = Instant::now();
 
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
         match rx.try_recv() {
             Ok(event) => match event {
                 Event::KeyPress(key) => {
@@ -81,7 +98,10 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
                         }
                     }
 
-                    manager.stop_signals.keyboard_stop_signal.store(false, Ordering::SeqCst);
+                    manager
+                        .stop_signals
+                        .keyboard_stop_signal
+                        .store(false, Ordering::SeqCst);
                 }
                 Event::KeyRelease(key) => {
                     for (i, zone) in KEY_ZONES.iter().enumerate() {
@@ -111,7 +131,8 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
 
         for (i, ripple_move) in zone_state.iter().enumerate() {
             if ripple_move != &RippleMove::Off {
-                final_arr[(i * 3)..((i * 3) + 3)].copy_from_slice(&rgb_array[(i * 3)..((i * 3) + 3)]);
+                final_arr[(i * 3)..((i * 3) + 3)]
+                    .copy_from_slice(&rgb_array[(i * 3)..((i * 3) + 3)]);
             }
         }
 
@@ -124,11 +145,20 @@ pub fn play(manager: &mut Inner, p: &Lighting) {
     kill_thread.store(true, Ordering::SeqCst);
 }
 
-fn advance_zone_state(zone_state: [RippleMove; 4], last_step_time: &mut Instant, speed: &u8) -> [RippleMove; 4] {
+fn advance_zone_state(
+    zone_state: [RippleMove; 4],
+    last_step_time: &mut Instant,
+    speed: &u8,
+) -> [RippleMove; 4] {
     let now = Instant::now();
 
     if now - *last_step_time > Duration::from_millis((200 / *speed) as u64) {
-        let mut new_state: [RippleMove; 4] = [RippleMove::Off, RippleMove::Off, RippleMove::Off, RippleMove::Off];
+        let mut new_state: [RippleMove; 4] = [
+            RippleMove::Off,
+            RippleMove::Off,
+            RippleMove::Off,
+            RippleMove::Off,
+        ];
 
         *last_step_time = now;
 

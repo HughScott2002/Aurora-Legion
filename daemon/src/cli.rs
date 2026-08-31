@@ -117,28 +117,38 @@ fn parse_effect(arg: &str) -> Result<Effects, String> {
             for effect in Effects::iter() {
                 names.push(effect.into());
             }
-            Err(format!("unknown effect '{arg}', expected one of: {}", names.join(", ")))
+            Err(format!(
+                "unknown effect '{arg}', expected one of: {}",
+                names.join(", ")
+            ))
         }
     }
 }
 
 fn parse_brightness(arg: &str) -> Result<Brightness, String> {
-    Brightness::from_str(arg).map_err(|_| format!("unknown brightness '{arg}', expected Low or High"))
+    Brightness::from_str(arg)
+        .map_err(|_| format!("unknown brightness '{arg}', expected Low or High"))
 }
 
 fn parse_direction(arg: &str) -> Result<Direction, String> {
-    Direction::from_str(arg).map_err(|_| format!("unknown direction '{arg}', expected Left or Right"))
+    Direction::from_str(arg)
+        .map_err(|_| format!("unknown direction '{arg}', expected Left or Right"))
 }
 
 fn parse_colors(arg: &str) -> Result<[u8; 12], String> {
     let mut parsed: Vec<u8> = Vec::with_capacity(12);
     for part in arg.split(',') {
-        let value = part.trim().parse::<u8>().map_err(|_| format!("'{part}' is not a number between 0 and 255"))?;
+        let value = part
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| format!("'{part}' is not a number between 0 and 255"))?;
         parsed.push(value);
     }
 
     let count = parsed.len();
-    let colors: [u8; 12] = parsed.try_into().map_err(|_| format!("expected 12 comma-separated values (4 RGB triplets), got {count}"))?;
+    let colors: [u8; 12] = parsed
+        .try_into()
+        .map_err(|_| format!("expected 12 comma-separated values (4 RGB triplets), got {count}"))?;
     Ok(colors)
 }
 
@@ -157,7 +167,9 @@ pub fn run(command: ClientCommand) -> ExitCode {
         ClientCommand::Slot(args) => run_slot(&args),
         ClientCommand::LoadProfile { path } => run_load_profile(&path),
         ClientCommand::CustomEffect { path } => run_custom_effect(&path),
-        ClientCommand::Stop => run_simple_request(Request::StopCustomEffect, "custom effect stopped"),
+        ClientCommand::Stop => {
+            run_simple_request(Request::StopCustomEffect, "custom effect stopped")
+        }
         ClientCommand::Shutdown => run_simple_request(Request::Shutdown, "daemon asked to exit"),
     }
 }
@@ -204,16 +216,25 @@ fn run_status() -> ExitCode {
             println!("keyboard: permission denied ({message})");
             println!("          install the udev rule: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/how-to/install-linux.md#grant-keyboard-access");
         }
-        aurora_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
+        aurora_protocol::ipc::KeyboardStatus::Error { message } => {
+            println!("keyboard: error ({message})")
+        }
     }
 
-    let profile_name = state.current.name.clone().unwrap_or_else(|| "(unsaved)".to_string());
+    let profile_name = state
+        .current
+        .name
+        .clone()
+        .unwrap_or_else(|| "(unsaved)".to_string());
     println!("profile:  {profile_name}");
 
     match state.active_slot.index() {
         Some(slot_index) => {
             let lighting = &state.current.slots[slot_index];
-            println!("slot:     {} of {SLOT_COUNT} ({} effect)", state.active_slot, lighting.effect);
+            println!(
+                "slot:     {} of {SLOT_COUNT} ({} effect)",
+                state.active_slot, lighting.effect
+            );
         }
         None => println!("slot:     off (Fn+Space turns the backlight back on)"),
     }
@@ -233,7 +254,11 @@ fn run_status() -> ExitCode {
     for profile in &state.profiles {
         saved_names.push(profile.name.clone());
     }
-    println!("saved:    {} profiles ({})", state.profiles.len(), saved_names.join(", "));
+    println!(
+        "saved:    {} profiles ({})",
+        state.profiles.len(),
+        saved_names.join(", ")
+    );
 
     ExitCode::SUCCESS
 }
@@ -347,7 +372,10 @@ fn run_load_profile(path: &Path) -> ExitCode {
 
 fn apply_lighting_directly(lighting: &Lighting) -> ExitCode {
     if !lighting.effect.is_built_in() {
-        eprintln!("aurora: no daemon is running, and the {} effect needs one (it is software-driven).", lighting.effect);
+        eprintln!(
+            "aurora: no daemon is running, and the {} effect needs one (it is software-driven).",
+            lighting.effect
+        );
         eprintln!("           start the daemon with: aurora daemon");
         return ExitCode::FAILURE;
     }
@@ -409,7 +437,10 @@ fn run_custom_effect(path: &Path) -> ExitCode {
     let effect = match CustomEffect::from_file(path) {
         Ok(effect) => effect,
         Err(_) => {
-            eprintln!("aurora: could not load custom effect from {}", path.display());
+            eprintln!(
+                "aurora: could not load custom effect from {}",
+                path.display()
+            );
             return ExitCode::FAILURE;
         }
     };

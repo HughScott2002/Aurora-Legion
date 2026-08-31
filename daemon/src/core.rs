@@ -15,8 +15,9 @@ use std::{
 use aurora_protocol::{
     custom_effect::CustomEffect,
     ipc::{
-        CustomEffectSummary, DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus, ProfileSummary, Request, Response, ResponseEnvelope,
-        SlotSelection, Subsystem, SubsystemState, MAX_CUSTOM_EFFECT_STEPS, MAX_SAVED_CUSTOM_EFFECTS, MAX_SAVED_PROFILES,
+        CustomEffectSummary, DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus,
+        ProfileSummary, Request, Response, ResponseEnvelope, SlotSelection, Subsystem,
+        SubsystemState, MAX_CUSTOM_EFFECT_STEPS, MAX_SAVED_CUSTOM_EFFECTS, MAX_SAVED_PROFILES,
     },
     profile::{Lighting, Profile, MAX_NAME_BYTES},
 };
@@ -70,7 +71,10 @@ pub enum Command {
     /// An optional subsystem changed state. Sent by the adapter that owns
     /// it, so "Fn+Space does not work here" becomes protocol-visible
     /// instead of a log line nobody reads.
-    SubsystemStatus { subsystem: Subsystem, state: SubsystemState },
+    SubsystemStatus {
+        subsystem: Subsystem,
+        state: SubsystemState,
+    },
 }
 
 /// A line queued for one client connection; the connection's writer thread
@@ -123,7 +127,11 @@ pub struct Core {
     shutdown_requested: bool,
 }
 
-pub fn run(command_tx: &Sender<Command>, command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
+pub fn run(
+    command_tx: &Sender<Command>,
+    command_rx: &Receiver<Command>,
+    shutdown_flag: &Arc<AtomicBool>,
+) {
     let settings = Settings::load_or_migrate();
     let current_profile = settings.current_profile.clone();
     let active_slot = settings.active_slot;
@@ -223,7 +231,11 @@ impl Core {
                 let counter_result = slot_reader.read_slot_counter();
                 self.active_slot = anchor_slot(self.active_slot, counter_result);
 
-                let engine = EffectManager::new(*keyboard, self.stop_signals.clone(), Some(self.command_tx.clone()));
+                let engine = EffectManager::new(
+                    *keyboard,
+                    self.stop_signals.clone(),
+                    Some(self.command_tx.clone()),
+                );
                 self.engine = Some(engine);
                 self.slot_reader = Some(slot_reader);
                 self.keyboard_status = KeyboardStatus::Connected;
@@ -245,9 +257,16 @@ impl Core {
 
     fn handle_command(&mut self, command: Command) {
         match command {
-            Command::Ipc { envelope_id, request, out_tx } => {
+            Command::Ipc {
+                envelope_id,
+                request,
+                out_tx,
+            } => {
                 let response = self.handle_request(request, &out_tx);
-                let envelope = ResponseEnvelope { id: envelope_id, resp: response };
+                let envelope = ResponseEnvelope {
+                    id: envelope_id,
+                    resp: response,
+                };
                 let send_result = out_tx.send(Outbound::Response(envelope));
                 if send_result.is_err() {
                     // Client vanished between request and response; harmless.
@@ -330,7 +349,9 @@ impl Core {
                     daemon_version: env!("CARGO_PKG_VERSION").to_string(),
                 }
             }
-            Request::GetState => Response::State { state: self.state_snapshot() },
+            Request::GetState => Response::State {
+                state: self.state_snapshot(),
+            },
             Request::Subscribe => {
                 self.subscribers.push(out_tx.clone());
                 Response::Ok
@@ -403,7 +424,10 @@ impl Core {
         // which is exactly what leaves the keyboard dark. Inherit the
         // deadline instead of cancelling it.
         if self.slot_apply_at.is_some() {
-            eprintln!("core: client selected slot {}, applying after the pending transition", self.active_slot);
+            eprintln!(
+                "core: client selected slot {}, applying after the pending transition",
+                self.active_slot
+            );
             self.broadcast_state();
             return Response::Ok;
         }
@@ -534,7 +558,10 @@ impl Core {
 
         match found {
             Some(effect) => self.play_custom_effect(effect),
-            None => error_response(ErrorKind::NoSuchCustomEffect, &format!("no saved custom effect called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchCustomEffect,
+                &format!("no saved custom effect called '{name}'"),
+            ),
         }
     }
 
@@ -545,7 +572,10 @@ impl Core {
 
     fn add_profile(&mut self, profile: Profile) -> Response {
         let Some(name) = profile.name.clone() else {
-            return error_response(ErrorKind::InvalidRequest, "profile needs a name to be saved");
+            return error_response(
+                ErrorKind::InvalidRequest,
+                "profile needs a name to be saved",
+            );
         };
         if let Some(rejection) = validate_name(&name, "profile") {
             return rejection;
@@ -579,7 +609,11 @@ impl Core {
     }
 
     fn delete_profile(&mut self, name: &str) -> Response {
-        let position = self.settings.profiles.iter().position(|saved| saved.name.as_deref() == Some(name));
+        let position = self
+            .settings
+            .profiles
+            .iter()
+            .position(|saved| saved.name.as_deref() == Some(name));
 
         match position {
             Some(index) => {
@@ -588,7 +622,10 @@ impl Core {
                 self.broadcast_state();
                 Response::Ok
             }
-            None => error_response(ErrorKind::NoSuchProfile, &format!("no saved profile called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchProfile,
+                &format!("no saved profile called '{name}'"),
+            ),
         }
     }
 
@@ -605,14 +642,20 @@ impl Core {
             // The active slot survives a profile switch: you keep looking at
             // the same position, with the new profile's lighting in it.
             Some(profile) => self.set_profile(profile),
-            None => error_response(ErrorKind::NoSuchProfile, &format!("no saved profile called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchProfile,
+                &format!("no saved profile called '{name}'"),
+            ),
         }
     }
 
     fn cycle_profile(&mut self) -> Response {
         let profile_count = self.settings.profiles.len();
         if profile_count == 0 {
-            return error_response(ErrorKind::NoSuchProfile, "no saved profiles to cycle through");
+            return error_response(
+                ErrorKind::NoSuchProfile,
+                "no saved profiles to cycle through",
+            );
         }
 
         let current_name = self.current_profile.name.clone();
@@ -637,7 +680,10 @@ impl Core {
 
     fn add_custom_effect(&mut self, effect: CustomEffect) -> Response {
         let Some(name) = effect.name.clone() else {
-            return error_response(ErrorKind::InvalidRequest, "custom effect needs a name to be saved");
+            return error_response(
+                ErrorKind::InvalidRequest,
+                "custom effect needs a name to be saved",
+            );
         };
         if let Some(rejection) = validate_name(&name, "custom effect") {
             return rejection;
@@ -671,7 +717,11 @@ impl Core {
     }
 
     fn delete_custom_effect(&mut self, name: &str) -> Response {
-        let position = self.settings.effects.iter().position(|saved| saved.name.as_deref() == Some(name));
+        let position = self
+            .settings
+            .effects
+            .iter()
+            .position(|saved| saved.name.as_deref() == Some(name));
 
         match position {
             Some(index) => {
@@ -680,7 +730,10 @@ impl Core {
                 self.broadcast_state();
                 Response::Ok
             }
-            None => error_response(ErrorKind::NoSuchCustomEffect, &format!("no saved custom effect called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchCustomEffect,
+                &format!("no saved custom effect called '{name}'"),
+            ),
         }
     }
 
@@ -695,7 +748,8 @@ impl Core {
             profiles.push(ProfileSummary { name: name.clone() });
         }
 
-        let mut custom_effects: Vec<CustomEffectSummary> = Vec::with_capacity(self.settings.effects.len());
+        let mut custom_effects: Vec<CustomEffectSummary> =
+            Vec::with_capacity(self.settings.effects.len());
         for saved in &self.settings.effects {
             let Some(name) = &saved.name else {
                 continue;
@@ -812,7 +866,10 @@ impl Core {
 /// An unreadable or unsettled counter decides nothing, and the persisted
 /// selection stands. That matters on machines where the read never works:
 /// they keep their slot instead of being forced to the first one.
-fn anchor_slot(persisted: SlotSelection, counter_result: Result<u8, legion_rgb_driver::error::Error>) -> SlotSelection {
+fn anchor_slot(
+    persisted: SlotSelection,
+    counter_result: Result<u8, legion_rgb_driver::error::Error>,
+) -> SlotSelection {
     let counter = match counter_result {
         Ok(counter) => counter,
         Err(error) => {
@@ -822,7 +879,9 @@ fn anchor_slot(persisted: SlotSelection, counter_result: Result<u8, legion_rgb_d
     };
 
     let Some(reported) = SlotSelection::from_counter(counter) else {
-        eprintln!("core: startup counter was mid-transition ({counter:#04x}); keeping slot {persisted}");
+        eprintln!(
+            "core: startup counter was mid-transition ({counter:#04x}); keeping slot {persisted}"
+        );
         return persisted;
     };
 
@@ -849,12 +908,18 @@ fn anchor_slot(persisted: SlotSelection, counter_result: Result<u8, legion_rgb_d
 
 fn validate_name(name: &str, kind: &str) -> Option<Response> {
     if name.is_empty() {
-        return Some(error_response(ErrorKind::InvalidRequest, &format!("{kind} name is empty")));
+        return Some(error_response(
+            ErrorKind::InvalidRequest,
+            &format!("{kind} name is empty"),
+        ));
     }
     if name.len() > MAX_NAME_BYTES {
         return Some(error_response(
             ErrorKind::InvalidRequest,
-            &format!("{kind} name is {} bytes, the limit is {MAX_NAME_BYTES}", name.len()),
+            &format!(
+                "{kind} name is {} bytes, the limit is {MAX_NAME_BYTES}",
+                name.len()
+            ),
         ));
     }
 
@@ -863,12 +928,18 @@ fn validate_name(name: &str, kind: &str) -> Option<Response> {
 
 fn validate_custom_effect(effect: &CustomEffect) -> Option<Response> {
     if effect.effect_steps.is_empty() {
-        return Some(error_response(ErrorKind::InvalidRequest, "custom effect has no steps"));
+        return Some(error_response(
+            ErrorKind::InvalidRequest,
+            "custom effect has no steps",
+        ));
     }
     if effect.effect_steps.len() > MAX_CUSTOM_EFFECT_STEPS {
         return Some(error_response(
             ErrorKind::InvalidRequest,
-            &format!("custom effect has {} steps, the limit is {MAX_CUSTOM_EFFECT_STEPS}", effect.effect_steps.len()),
+            &format!(
+                "custom effect has {} steps, the limit is {MAX_CUSTOM_EFFECT_STEPS}",
+                effect.effect_steps.len()
+            ),
         ));
     }
 
@@ -890,16 +961,29 @@ fn validate_lighting(lighting: &Lighting) -> Option<Response> {
     if !SOFTWARE_SPEED_RANGE.contains(&lighting.speed) {
         return Some(error_response(
             ErrorKind::InvalidRequest,
-            &format!("speed {} outside {:?}", lighting.speed, SOFTWARE_SPEED_RANGE),
+            &format!(
+                "speed {} outside {:?}",
+                lighting.speed, SOFTWARE_SPEED_RANGE
+            ),
         ));
     }
 
-    if let aurora_protocol::effects::Effects::AmbientLight { fps, saturation_boost } = lighting.effect {
+    if let aurora_protocol::effects::Effects::AmbientLight {
+        fps,
+        saturation_boost,
+    } = lighting.effect
+    {
         if !(1..=60).contains(&fps) {
-            return Some(error_response(ErrorKind::InvalidRequest, &format!("ambient fps {fps} outside 1..=60")));
+            return Some(error_response(
+                ErrorKind::InvalidRequest,
+                &format!("ambient fps {fps} outside 1..=60"),
+            ));
         }
         if !(0.0..=1.0).contains(&saturation_boost) {
-            return Some(error_response(ErrorKind::InvalidRequest, "ambient saturation boost outside 0.0..=1.0"));
+            return Some(error_response(
+                ErrorKind::InvalidRequest,
+                "ambient saturation boost outside 0.0..=1.0",
+            ));
         }
     }
 
@@ -946,7 +1030,9 @@ mod tests {
     /// onto slot 1, overwriting whatever the user last chose.
     #[test]
     fn an_unreadable_counter_keeps_the_stored_slot() {
-        let read_error = Error::RangeError(RangeError { kind: RangeErrorKind::Slot });
+        let read_error = Error::RangeError(RangeError {
+            kind: RangeErrorKind::Slot,
+        });
         let anchored = anchor_slot(SlotSelection::Third, Err(read_error));
         assert_eq!(anchored, SlotSelection::Third);
     }
@@ -954,7 +1040,10 @@ mod tests {
     #[test]
     fn a_mid_transition_counter_keeps_the_stored_slot() {
         // Observed live: 0 persisted for over 20 seconds on a 2023 Pro.
-        assert_eq!(anchor_slot(SlotSelection::Second, Ok(0)), SlotSelection::Second);
+        assert_eq!(
+            anchor_slot(SlotSelection::Second, Ok(0)),
+            SlotSelection::Second
+        );
         assert_eq!(anchor_slot(SlotSelection::Off, Ok(9)), SlotSelection::Off);
     }
 }

@@ -74,35 +74,77 @@ pub enum AppMsg {
     Ipc(IpcUpdate),
 
     EffectSelected(usize),
-    ZoneColorPicked { zone_index: usize, color: [u8; 3] },
+    ZoneColorPicked {
+        zone_index: usize,
+        color: [u8; 3],
+    },
     GlobalColorDialogRequested,
-    GlobalColorPicked { color: [u8; 3] },
-    SpeedPicked { speed: u8 },
-    BrightnessPicked { high: bool },
-    DirectionPicked { index: usize },
-    SwipeModePicked { index: usize },
-    CleanWithBlackPicked { clean: bool },
-    AmbientFpsPicked { fps: u8 },
-    AmbientSaturationPicked { saturation: f32 },
+    GlobalColorPicked {
+        color: [u8; 3],
+    },
+    SpeedPicked {
+        speed: u8,
+    },
+    BrightnessPicked {
+        high: bool,
+    },
+    DirectionPicked {
+        index: usize,
+    },
+    SwipeModePicked {
+        index: usize,
+    },
+    CleanWithBlackPicked {
+        clean: bool,
+    },
+    AmbientFpsPicked {
+        fps: u8,
+    },
+    AmbientSaturationPicked {
+        saturation: f32,
+    },
 
-    SlotSelected { slot: SlotSelection },
+    SlotSelected {
+        slot: SlotSelection,
+    },
 
-    ProfileActivated { name: String },
-    ProfileDeleted { name: String },
+    ProfileActivated {
+        name: String,
+    },
+    ProfileDeleted {
+        name: String,
+    },
     SaveProfileDialogRequested,
-    SaveProfileConfirmed { name: String },
+    SaveProfileConfirmed {
+        name: String,
+    },
 
-    CustomEffectPlayed { name: String },
-    CustomEffectDeleted { name: String },
+    CustomEffectPlayed {
+        name: String,
+    },
+    CustomEffectDeleted {
+        name: String,
+    },
     CustomEffectStopped,
     CustomEffectFileRequested,
-    CustomEffectFileChosen { path: std::path::PathBuf },
+    CustomEffectFileChosen {
+        path: std::path::PathBuf,
+    },
 
     StartDaemonRequested,
     DaemonRestartRequested,
-    AutostartToggled { enabled: bool },
-    AutostartQueried { available: bool, enabled: bool, managed: bool },
-    ServiceActionFinished { description: String, error: Option<String> },
+    AutostartToggled {
+        enabled: bool,
+    },
+    AutostartQueried {
+        available: bool,
+        enabled: bool,
+        managed: bool,
+    },
+    ServiceActionFinished {
+        description: String,
+        error: Option<String>,
+    },
 }
 
 pub struct AppWidgets {
@@ -133,13 +175,18 @@ impl SimpleComponent for App {
             .build()
     }
 
-    fn init(_init: Self::Init, root: Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
+    fn init(
+        _init: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
         // --- Connection worker -------------------------------------------
         // input_sender().send rather than input(): the latter logs and
         // discards the failure, so the worker could never tell that the
         // window had closed and kept reconnecting into a dead runtime.
         let ipc_sender = sender.clone();
-        let ipc = ipc::spawn(move |update| ipc_sender.input_sender().send(AppMsg::Ipc(update)).is_ok());
+        let ipc =
+            ipc::spawn(move |update| ipc_sender.input_sender().send(AppMsg::Ipc(update)).is_ok());
 
         let model = App {
             connected: false,
@@ -177,7 +224,8 @@ impl SimpleComponent for App {
         profiles_page.set_icon_name(Some("view-list-bullet-symbolic"));
         let custom_page = view_stack.add_titled(&custom.root, Some("custom"), "Custom");
         custom_page.set_icon_name(Some("media-playback-start-symbolic"));
-        let settings_stack_page = view_stack.add_titled(&settings.root, Some("settings"), "Settings");
+        let settings_stack_page =
+            view_stack.add_titled(&settings.root, Some("settings"), "Settings");
         settings_stack_page.set_icon_name(Some("preferences-system-symbolic"));
 
         // --- Disconnected status page ------------------------------------
@@ -249,7 +297,11 @@ impl SimpleComponent for App {
         toolbar_view.add_bottom_bar(&switcher_bar);
 
         let narrow_title = adw::WindowTitle::new("Aurora", "");
-        let narrow_condition = adw::BreakpointCondition::new_length(adw::BreakpointConditionLengthType::MaxWidth, 550.0, adw::LengthUnit::Sp);
+        let narrow_condition = adw::BreakpointCondition::new_length(
+            adw::BreakpointConditionLengthType::MaxWidth,
+            550.0,
+            adw::LengthUnit::Sp,
+        );
         let narrow_breakpoint = adw::Breakpoint::new(narrow_condition);
         narrow_breakpoint.add_setter(&switcher_bar, "reveal", Some(&true.to_value()));
         narrow_breakpoint.add_setter(&header_bar, "title-widget", Some(&narrow_title.to_value()));
@@ -325,7 +377,11 @@ impl SimpleComponent for App {
                 self.push_lighting();
             }
             AppMsg::BrightnessPicked { high } => {
-                let brightness = if high { Brightness::High } else { Brightness::Low };
+                let brightness = if high {
+                    Brightness::High
+                } else {
+                    Brightness::Low
+                };
                 if self.lighting.brightness == brightness {
                     return;
                 }
@@ -333,7 +389,11 @@ impl SimpleComponent for App {
                 self.push_lighting();
             }
             AppMsg::DirectionPicked { index } => {
-                let direction = if index == 0 { Direction::Left } else { Direction::Right };
+                let direction = if index == 0 {
+                    Direction::Left
+                } else {
+                    Direction::Right
+                };
                 if self.lighting.direction == direction {
                     return;
                 }
@@ -341,7 +401,11 @@ impl SimpleComponent for App {
                 self.push_lighting();
             }
             AppMsg::SwipeModePicked { index } => {
-                let picked_mode = if index == 0 { SwipeMode::Change } else { SwipeMode::Fill };
+                let picked_mode = if index == 0 {
+                    SwipeMode::Change
+                } else {
+                    SwipeMode::Fill
+                };
                 let changed = match &mut self.lighting.effect {
                     Effects::Swipe { mode, .. } | Effects::SmoothWave { mode, .. } => {
                         if *mode == picked_mode {
@@ -359,7 +423,12 @@ impl SimpleComponent for App {
             }
             AppMsg::CleanWithBlackPicked { clean } => {
                 let changed = match &mut self.lighting.effect {
-                    Effects::Swipe { clean_with_black, .. } | Effects::SmoothWave { clean_with_black, .. } => {
+                    Effects::Swipe {
+                        clean_with_black, ..
+                    }
+                    | Effects::SmoothWave {
+                        clean_with_black, ..
+                    } => {
                         if *clean_with_black == clean {
                             false
                         } else {
@@ -391,7 +460,9 @@ impl SimpleComponent for App {
             }
             AppMsg::AmbientSaturationPicked { saturation: picked } => {
                 let changed = match &mut self.lighting.effect {
-                    Effects::AmbientLight { saturation_boost, .. } => {
+                    Effects::AmbientLight {
+                        saturation_boost, ..
+                    } => {
                         if (*saturation_boost - picked).abs() < 0.001 {
                             false
                         } else {
@@ -479,7 +550,9 @@ impl SimpleComponent for App {
                     return; // Echo from update_view.
                 }
                 if !self.autostart_available {
-                    self.queue_toast("No systemd unit found. Install the aurora.service unit first");
+                    self.queue_toast(
+                        "No systemd unit found. Install the aurora.service unit first",
+                    );
                     return;
                 }
                 if self.autostart_managed {
@@ -492,7 +565,11 @@ impl SimpleComponent for App {
                     deliver_sender.input(msg);
                 });
             }
-            AppMsg::AutostartQueried { available, enabled, managed } => {
+            AppMsg::AutostartQueried {
+                available,
+                enabled,
+                managed,
+            } => {
                 self.autostart_available = available;
                 self.autostart_enabled = enabled;
                 self.autostart_managed = managed;
@@ -523,14 +600,22 @@ impl SimpleComponent for App {
             }
         }
 
-        let visible_child = if self.connected { "main" } else { "disconnected" };
+        let visible_child = if self.connected {
+            "main"
+        } else {
+            "disconnected"
+        };
         let current_child = widgets.content_stack.visible_child_name();
         if current_child.as_deref() != Some(visible_child) {
             widgets.content_stack.set_visible_child_name(visible_child);
         }
 
         // --- Start button while a start attempt runs ----------------------
-        let start_label = if self.daemon_start_pending { "Starting…" } else { "Start Aurora" };
+        let start_label = if self.daemon_start_pending {
+            "Starting…"
+        } else {
+            "Start Aurora"
+        };
         if widgets.start_button.label().as_deref() != Some(start_label) {
             widgets.start_button.set_label(start_label);
         }
@@ -554,8 +639,12 @@ impl SimpleComponent for App {
         // only shown where a user action exists (the udev fix).
         match &state.keyboard {
             KeyboardStatus::PermissionDenied { .. } => {
-                widgets.permission_banner.set_title("Keyboard found, but access is denied");
-                widgets.permission_banner.set_button_label(Some("How to Fix…"));
+                widgets
+                    .permission_banner
+                    .set_title("Keyboard found, but access is denied");
+                widgets
+                    .permission_banner
+                    .set_button_label(Some("How to Fix…"));
                 widgets.permission_banner.set_revealed(true);
             }
             KeyboardStatus::Searching => {
@@ -569,7 +658,9 @@ impl SimpleComponent for App {
                 widgets.permission_banner.set_revealed(true);
             }
             KeyboardStatus::Error { message } => {
-                widgets.permission_banner.set_title(&format!("Keyboard error: {message}. Retrying automatically…"));
+                widgets.permission_banner.set_title(&format!(
+                    "Keyboard error: {message}. Retrying automatically…"
+                ));
                 widgets.permission_banner.set_button_label(None);
                 widgets.permission_banner.set_revealed(true);
             }
@@ -588,8 +679,17 @@ impl SimpleComponent for App {
         }
 
         // --- Other pages ----------------------------------------------------
-        widgets.profiles.sync(&state.profiles, state.current.name.as_deref(), &state.hotkey, &sender);
-        widgets.custom.sync(&state.custom_effects, state.custom_effect_playing.as_deref(), &sender);
+        widgets.profiles.sync(
+            &state.profiles,
+            state.current.name.as_deref(),
+            &state.hotkey,
+            &sender,
+        );
+        widgets.custom.sync(
+            &state.custom_effects,
+            state.custom_effect_playing.as_deref(),
+            &sender,
+        );
 
         // --- Daemon page ----------------------------------------------------
         // Same stale-daemon case the CLI reports: an upgrade replaces the
@@ -599,14 +699,20 @@ impl SimpleComponent for App {
         let status_text = if state.version == own_version {
             format!("Running (v{})", state.version)
         } else {
-            format!("Running (v{}), older than this app (v{own_version}). Restart it to upgrade.", state.version)
+            format!(
+                "Running (v{}), older than this app (v{own_version}). Restart it to upgrade.",
+                state.version
+            )
         };
         if widgets.settings.status_row.subtitle().as_deref() != Some(status_text.as_str()) {
             widgets.settings.status_row.set_subtitle(&status_text);
         }
 
         if widgets.settings.autostart_row.is_active() != self.autostart_enabled {
-            widgets.settings.autostart_row.set_active(self.autostart_enabled);
+            widgets
+                .settings
+                .autostart_row
+                .set_active(self.autostart_enabled);
         }
         let autostart_subtitle = if !self.autostart_available {
             "No systemd unit installed"
@@ -616,11 +722,17 @@ impl SimpleComponent for App {
             "Enable the systemd user service"
         };
         if widgets.settings.autostart_row.subtitle().as_deref() != Some(autostart_subtitle) {
-            widgets.settings.autostart_row.set_subtitle(autostart_subtitle);
+            widgets
+                .settings
+                .autostart_row
+                .set_subtitle(autostart_subtitle);
         }
         let switch_sensitive = self.autostart_available && !self.autostart_managed;
         if widgets.settings.autostart_row.is_sensitive() != switch_sensitive {
-            widgets.settings.autostart_row.set_sensitive(switch_sensitive);
+            widgets
+                .settings
+                .autostart_row
+                .set_sensitive(switch_sensitive);
         }
     }
 }
@@ -643,10 +755,17 @@ impl App {
             IpcUpdate::State(state) => {
                 // Toast the recovery transition: the banner already covers
                 // the loss, but its silent disappearance is easy to miss.
-                let was_connected = matches!(self.state.as_ref().map(|old| &old.keyboard), Some(KeyboardStatus::Connected));
+                let was_connected = matches!(
+                    self.state.as_ref().map(|old| &old.keyboard),
+                    Some(KeyboardStatus::Connected)
+                );
                 let now_connected = matches!(state.keyboard, KeyboardStatus::Connected);
                 if now_connected && !was_connected && self.state.is_some() {
-                    let text = if self.keyboard_seen { "Keyboard reconnected" } else { "Keyboard connected" };
+                    let text = if self.keyboard_seen {
+                        "Keyboard reconnected"
+                    } else {
+                        "Keyboard connected"
+                    };
                     self.queue_toast(text);
                 }
                 if now_connected {
@@ -706,22 +825,27 @@ impl App {
             }
         };
 
-        let mut effect: aurora_protocol::custom_effect::CustomEffect = match serde_json::from_str(&contents) {
-            Ok(effect) => effect,
-            Err(error) => {
-                self.queue_toast(&format!("Not a valid custom effect file: {error}"));
-                return;
-            }
-        };
+        let mut effect: aurora_protocol::custom_effect::CustomEffect =
+            match serde_json::from_str(&contents) {
+                Ok(effect) => effect,
+                Err(error) => {
+                    self.queue_toast(&format!("Not a valid custom effect file: {error}"));
+                    return;
+                }
+            };
 
         // Name it after the file when the file itself has no name, so it
         // can be saved and listed.
         if effect.name.is_none() {
-            let stem = path.file_stem().map(|stem| stem.to_string_lossy().into_owned());
+            let stem = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned());
             effect.name = stem;
         }
 
-        self.ipc.send(Request::AddCustomEffect { effect: effect.clone() });
+        self.ipc.send(Request::AddCustomEffect {
+            effect: effect.clone(),
+        });
         self.ipc.send(Request::PlayCustomEffect { effect });
     }
 
@@ -804,11 +928,16 @@ impl App {
         }
 
         // Per-effect groups.
-        let is_ambient = slot_is_lit && matches!(self.lighting.effect, Effects::AmbientLight { .. });
+        let is_ambient =
+            slot_is_lit && matches!(self.lighting.effect, Effects::AmbientLight { .. });
         if page.ambient_group.get_visible() != is_ambient {
             page.ambient_group.set_visible(is_ambient);
         }
-        if let Effects::AmbientLight { fps, saturation_boost } = self.lighting.effect {
+        if let Effects::AmbientLight {
+            fps,
+            saturation_boost,
+        } = self.lighting.effect
+        {
             let shown_fps = page.fps_row.value() as u8;
             if shown_fps != fps {
                 page.fps_row.set_value(f64::from(fps));
@@ -819,11 +948,23 @@ impl App {
             }
         }
 
-        let is_swipe = slot_is_lit && matches!(self.lighting.effect, Effects::Swipe { .. } | Effects::SmoothWave { .. });
+        let is_swipe = slot_is_lit
+            && matches!(
+                self.lighting.effect,
+                Effects::Swipe { .. } | Effects::SmoothWave { .. }
+            );
         if page.swipe_group.get_visible() != is_swipe {
             page.swipe_group.set_visible(is_swipe);
         }
-        if let Effects::Swipe { mode, clean_with_black } | Effects::SmoothWave { mode, clean_with_black } = self.lighting.effect {
+        if let Effects::Swipe {
+            mode,
+            clean_with_black,
+        }
+        | Effects::SmoothWave {
+            mode,
+            clean_with_black,
+        } = self.lighting.effect
+        {
             let mode_index: u32 = match mode {
                 SwipeMode::Change => 0,
                 SwipeMode::Fill => 1,
@@ -847,8 +988,12 @@ impl App {
         // Say so where the key would have been used, rather than letting
         // "Fn+Space cycles them" imply something untrue on this machine.
         let slot_note = match &state.slot_sync {
-            SubsystemState::Unavailable { reason } => Some(format!("Fn+Space is not available here ({reason}). Use these buttons instead.")),
-            SubsystemState::Degraded { reason } => Some(format!("Fn+Space may be out of step ({reason}). Pick a slot to resync.")),
+            SubsystemState::Unavailable { reason } => Some(format!(
+                "Fn+Space is not available here ({reason}). Use these buttons instead."
+            )),
+            SubsystemState::Degraded { reason } => Some(format!(
+                "Fn+Space may be out of step ({reason}). Pick a slot to resync."
+            )),
             _ => None,
         };
         page.set_slot_note(slot_note.as_deref());
@@ -954,7 +1099,10 @@ fn show_save_profile_dialog(sender: &ComponentSender<App>) {
     entry.set_placeholder_text(Some("Profile name"));
     entry.set_margin_top(6);
 
-    let dialog = adw::AlertDialog::new(Some("Save Profile"), Some("Save the current lighting as a profile."));
+    let dialog = adw::AlertDialog::new(
+        Some("Save Profile"),
+        Some("Save the current lighting as a profile."),
+    );
     dialog.set_extra_child(Some(&entry));
     dialog.add_response("cancel", "Cancel");
     dialog.add_response("save", "Save");
@@ -992,9 +1140,11 @@ fn show_save_profile_dialog(sender: &ComponentSender<App>) {
 /// The udev rule offered by the permission-denied help dialog. Vendor-wide
 /// on purpose: one rule covers every supported model, unlike the
 /// product-specific example in the quick-start guide.
-const UDEV_RULE_TEXT: &str = r#"KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", TAG+="uaccess""#;
+const UDEV_RULE_TEXT: &str =
+    r#"KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", TAG+="uaccess""#;
 
-const SETUP_GUIDE_URL: &str = "https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access";
+const SETUP_GUIDE_URL: &str =
+    "https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access";
 
 fn show_permission_help_dialog() {
     let Some(window) = relm4::main_application().active_window() else {
@@ -1031,11 +1181,15 @@ fn show_permission_help_dialog() {
         }
         if response == "guide" {
             let launcher = gtk::UriLauncher::new(SETUP_GUIDE_URL);
-            launcher.launch(None::<&gtk::Window>, None::<&gtk::gio::Cancellable>, |result| {
-                if let Err(error) = result {
-                    eprintln!("app: could not open setup guide: {error}");
-                }
-            });
+            launcher.launch(
+                None::<&gtk::Window>,
+                None::<&gtk::gio::Cancellable>,
+                |result| {
+                    if let Err(error) = result {
+                        eprintln!("app: could not open setup guide: {error}");
+                    }
+                },
+            );
         }
     });
 
@@ -1094,16 +1248,23 @@ fn show_custom_effect_file_dialog(sender: &ComponentSender<App>) {
     let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
     filters.append(&json_filter);
 
-    let dialog = gtk::FileDialog::builder().title("Load Custom Effect").filters(&filters).build();
+    let dialog = gtk::FileDialog::builder()
+        .title("Load Custom Effect")
+        .filters(&filters)
+        .build();
 
     let dialog_sender = sender.clone();
-    dialog.open(Some(&window), None::<&gtk::gio::Cancellable>, move |result| {
-        let file = match result {
-            Ok(file) => file,
-            Err(_) => return, // Dismissed.
-        };
-        if let Some(path) = file.path() {
-            dialog_sender.input(AppMsg::CustomEffectFileChosen { path });
-        }
-    });
+    dialog.open(
+        Some(&window),
+        None::<&gtk::gio::Cancellable>,
+        move |result| {
+            let file = match result {
+                Ok(file) => file,
+                Err(_) => return, // Dismissed.
+            };
+            if let Some(path) = file.path() {
+                dialog_sender.input(AppMsg::CustomEffectFileChosen { path });
+            }
+        },
+    );
 }
