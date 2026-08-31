@@ -217,7 +217,9 @@
           workspaceSrcString = builtins.toString workspaceSrc;
 
           dataFileFilter =
-            path: _type: (lib.hasPrefix "${workspaceSrcString}/gui/data/" path) || (lib.hasPrefix "${workspaceSrcString}/systemd/" path);
+            path: _type:
+            (lib.hasPrefix "${workspaceSrcString}/gui/data/" path)
+            || (lib.hasPrefix "${workspaceSrcString}/systemd/" path);
           workspaceFilter = path: type: (dataFileFilter path type) || (craneLib.filterCargoSources path type);
 
           src = lib.cleanSourceWith {
@@ -347,7 +349,26 @@
               RUST_BACKTRACE = "1";
               inherit (buildEnvVars) LIBCLANG_PATH;
 
-              buildInputs = [ rust ] ++ deps;
+              # gnupg verifies the commits that carry a GPG signature rather
+              # than an SSH one, which is everything GitHub's web UI writes.
+              # Without it `git log --format=%G?` reports E on those and the
+              # signing audit cannot tell an unsigned commit from an
+              # unverifiable one.
+              buildInputs = [
+                rust
+                pkgs.gnupg
+              ]
+              ++ deps;
+
+              # hooks/ is the CI for this repo. Point git at it here rather
+              # than leaving it a per-clone step that is easy to forget and
+              # silent when missed.
+              shellHook = ''
+                if [ -e .git ] && [ "$(git config --get core.hooksPath)" != "hooks" ]; then
+                  git config core.hooksPath hooks
+                  echo "devshell: set core.hooksPath to hooks"
+                fi
+              '';
             };
         };
     };

@@ -1,14 +1,111 @@
 #!/bin/sh
-# Pre-push gate: the repo must `nix build` before it leaves this machine.
-# Replaces CI. Enable once per clone with:
-#   git config core.hooksPath hooks
-# Bypass for emergencies:
-#   SKIP_NIX_BUILD=1 git push
+# Pre-push gate. There is no CI beyond the release workflow, so this is the
+# check. Stages run cheapest first:
+#   1. No AI attribution trailers among the outgoing commits.
+#   2. Lints.
+#   3. Tests.
+#   4. A build.
+#
+# Formatting is deliberately not a stage yet: rustfmt.toml is inherited from
+# upstream and its 200 column limit does not match how this code is written.
+# Settle the config first, then add `cargo fmt --all --check` here.
+#
+# Enable once per clone with `git config core.hooksPath hooks`. The devshell
+# does it for you.
+#
+# nix is used when it is present and is not required when it is not, so a
+# maintainer who does not run NixOS can still push. Bypass the compile stages
+# for emergencies:
+#   SKIP_BUILD=1 git push
+# SKIP_NIX_BUILD is honoured as the old name for the same switch.
+#
+# The trailer scan has no bypass of its own. A commit that trips it has to be
+# rewritten, because once it is pushed the only fix left is a force-push.
 
-if [ "${SKIP_NIX_BUILD:-0}" = "1" ]; then
-    echo "pre-push: SKIP_NIX_BUILD=1 set, skipping nix build"
+zero_sha=0000000000000000000000000000000000000000
+trailer_pattern='^(Co-Authored-By:[[:space:]]*Claude|Claude-Session:)'
+
+# git feeds one line per ref being pushed:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# The commit-msg hook catches these at commit time; this catches what got in
+# some other way, such as an amend, a rebase, a merge or a cherry-pick.
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    if [ "$local_sha" = "$zero_sha" ]; then
+        # Deleting a ref. Nothing is being added, so there is nothing to scan.
+        continue
+    fi
+
+    if [ "$remote_sha" = "$zero_sha" ]; then
+        # A ref the remote does not have yet. Scan what it adds that is not
+        # already on some other remote branch.
+        outgoing=$(git rev-list "$local_sha" --not --remotes)
+    else
+        outgoing=$(git rev-list "$remote_sha..$local_sha")
+    fi
+
+    offenders=""
+    for sha in $outgoing; do
+        message=$(git show --no-patch --format='%B' "$sha")
+        hit=$(printf '%s\n' "$message" | grep -iE "$trailer_pattern")
+        if [ -n "$hit" ]; then
+            summary=$(git show --no-patch --format='%h %s' "$sha")
+            offenders="${offenders}${summary}
+"
+        fi
+    done
+
+    if [ -n "$offenders" ]; then
+        echo "pre-push: AI attribution trailers in outgoing commits:" >&2
+        printf '%s' "$offenders" >&2
+        echo "" >&2
+        echo "Rewrite them before pushing. Nothing was pushed." >&2
+        exit 1
+    fi
+done
+
+if [ "${SKIP_BUILD:-${SKIP_NIX_BUILD:-0}}" = "1" ]; then
+    echo "pre-push: SKIP_BUILD=1 set, skipping the compile stages"
     exit 0
 fi
 
-echo "pre-push: running nix build (set SKIP_NIX_BUILD=1 to bypass)"
-exec nix build
+if command -v nix >/dev/null 2>&1; then
+    have_nix=1
+else
+    have_nix=0
+    echo "pre-push: no nix on PATH, calling cargo directly."
+    echo "pre-push: see docs/how-to/build-from-source.md for the native deps."
+fi
+
+# The devshell carries the native libraries that clippy, the tests and the
+# build all link against. Without nix the maintainer supplies them instead.
+run_check() {
+    if [ "$have_nix" = "1" ]; then
+        nix develop -c "$@"
+    else
+        "$@"
+    fi
+}
+
+# scrap needs both of these to compile outside the flake, which patches
+# libwebm for <cstdint> and turns on pkg-config discovery on its own. Keep
+# them in step with flake.nix if either changes there.
+scrap_cxxflags="-include cstdint"
+scrap_feature="aurora/scrap-pkg-config"
+
+echo "pre-push: running clippy"
+run_check env CXXFLAGS="$scrap_cxxflags" \
+    cargo clippy --workspace --all-targets --features "$scrap_feature" \
+    -- -D warnings || exit 1
+
+echo "pre-push: running tests"
+run_check env CXXFLAGS="$scrap_cxxflags" \
+    cargo test --workspace --features "$scrap_feature" || exit 1
+
+# cargo builds this stage on every host, including the ones that have nix.
+# `nix build` would be the stronger check, since it is what the release
+# workflow runs, but it fetches crates through the nix daemon and crates.io
+# rejects the User-Agent that daemon sends, so it fails for reasons that have
+# nothing to do with the change being pushed. Put it back once that is fixed.
+echo "pre-push: running the build"
+run_check env CXXFLAGS="$scrap_cxxflags" \
+    cargo build --workspace --features "$scrap_feature"

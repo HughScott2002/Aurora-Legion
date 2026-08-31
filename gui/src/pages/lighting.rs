@@ -21,8 +21,14 @@ use crate::{
 pub struct LightingPage {
     pub root: gtk::Widget,
     pub preview: KeyboardPreview,
+    /// Preview card and its caption together, so the off position can take
+    /// both away rather than leaving an empty card behind.
+    pub preview_box: gtk::Box,
     /// Caption under the preview naming the active slot.
     pub slot_label: gtk::Label,
+    /// Shown in place of everything below the slot picker while the
+    /// backlight is off.
+    pub off_state: gtk::Box,
 
     /// Slot picker: linked toggle buttons, one per lit slot plus off.
     /// Horizontal because four short choices in a column is a list
@@ -34,10 +40,12 @@ pub struct LightingPage {
     pub slot_note: gtk::Label,
 
     pub effect_row: adw::ComboRow,
+    pub effect_group: adw::PreferencesGroup,
 
     pub zone_buttons: [gtk::ColorDialogButton; 4],
     pub colors_group: adw::PreferencesGroup,
 
+    pub options_group: adw::PreferencesGroup,
     pub speed_row: adw::SpinRow,
     pub brightness_row: adw::SwitchRow,
     pub direction_row: adw::ComboRow,
@@ -65,6 +73,17 @@ pub fn effect_names() -> Vec<&'static str> {
 /// control rather than four differently sized ones.
 const SLOT_BUTTON_WIDTH_PX: i32 = 56;
 
+/// The off mark: the page carries nothing else, so the glyph is the thing
+/// that answers "what is this screen" from across a desk. Faded to stay a
+/// statement of fact rather than a warning, at the opacity libadwaita's
+/// own status page uses on its icon.
+const OFF_ICON_PX: i32 = 160;
+const OFF_ICON_OPACITY: f64 = 0.55;
+/// Added to the box spacing below, so the glyph gets the wider gap
+/// libadwaita puts under a status page icon and the two labels stay
+/// paired.
+const OFF_ICON_GAP_PX: i32 = 12;
+
 pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
     content.set_margin_top(18);
@@ -82,6 +101,23 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     slot_box.add_css_class("linked");
     slot_box.set_halign(gtk::Align::Center);
 
+    // Off leads the picker: it is the position the backlight starts from
+    // and returns to, and putting it first means the three lit slots read
+    // left to right in their own order instead of being interrupted at the
+    // end. Fn+Space still cycles in the firmware's order; this is the
+    // reading order, not the cycle order.
+    let off_button = gtk::ToggleButton::with_label("Off");
+    off_button.set_width_request(SLOT_BUTTON_WIDTH_PX);
+    off_button.set_tooltip_text(Some("Backlight off, the fourth Fn+Space position"));
+    let off_sender = sender.clone();
+    off_button.connect_toggled(move |button| {
+        if !button.is_active() {
+            return;
+        }
+        off_sender.input(AppMsg::SlotSelected { slot: SlotSelection::Off });
+    });
+    slot_box.append(&off_button);
+
     let mut slot_buttons: Vec<gtk::ToggleButton> = Vec::with_capacity(SLOT_COUNT);
     for (slot_position, slot) in LIT_SLOTS.iter().enumerate() {
         let button = gtk::ToggleButton::with_label(&format!("{}", slot_position + 1));
@@ -97,26 +133,12 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
             slot_sender.input(AppMsg::SlotSelected { slot: selected_slot });
         });
 
+        // One group, so the buttons behave as a picker rather than four
+        // independent switches.
+        button.set_group(Some(&off_button));
+
         slot_box.append(&button);
         slot_buttons.push(button);
-    }
-
-    let off_button = gtk::ToggleButton::with_label("Off");
-    off_button.set_width_request(SLOT_BUTTON_WIDTH_PX);
-    off_button.set_tooltip_text(Some("Backlight off, the fourth Fn+Space position"));
-    let off_sender = sender.clone();
-    off_button.connect_toggled(move |button| {
-        if !button.is_active() {
-            return;
-        }
-        off_sender.input(AppMsg::SlotSelected { slot: SlotSelection::Off });
-    });
-    slot_box.append(&off_button);
-
-    // One group, so the buttons behave as a picker rather than four
-    // independent switches.
-    for button in &slot_buttons {
-        button.set_group(Some(&off_button));
     }
 
     let slot_note = gtk::Label::new(None);
@@ -147,7 +169,14 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     content.append(&preview_box);
 
     // --- Effect selector -------------------------------------------------
+    // Every group below the preview edits the selected slot, and the off
+    // position holds no lighting to edit, so all of them are built hidden
+    // and `sync_lighting_page` shows them once a lit slot is known. State
+    // arrives after the window does; a group built visible would be on
+    // screen during the gap and then vanish if the slot turned out to be
+    // off.
     let effect_group = adw::PreferencesGroup::new();
+    effect_group.set_visible(false);
 
     let names = effect_names();
     let effect_model = gtk::StringList::new(&names);
@@ -168,6 +197,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Zone colors ------------------------------------------------------
     let colors_group = adw::PreferencesGroup::new();
     colors_group.set_title("Zone Colors");
+    colors_group.set_visible(false);
 
     let zone_row = adw::ActionRow::new();
     zone_row.set_title("Zones");
@@ -220,6 +250,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // --- Common options ---------------------------------------------------
     let options_group = adw::PreferencesGroup::new();
     options_group.set_title("Options");
+    options_group.set_visible(false);
 
     let speed_adjustment = gtk::Adjustment::new(1.0, 1.0, 10.0, 1.0, 1.0, 0.0);
     let speed_row = adw::SpinRow::new(Some(&speed_adjustment), 1.0, 0);
@@ -319,6 +350,48 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
 
     content.append(&swipe_group);
 
+    // --- Off state --------------------------------------------------------
+    // The off position has no lighting to edit and none to preview, so
+    // everything above is taken away and this stands in its place. It
+    // expands into whatever the slot picker leaves, which puts it in the
+    // middle of the window at any size.
+    //
+    // Composed by hand rather than with `adw::StatusPage`, which carries
+    // its own scrolled window and its own clamp; the page already sits in
+    // one of each, and nesting them fights over height.
+    // A slashed glyph, not a dim one. The brightness icons differ from
+    // their lit versions only by weight, so at a glance they read as "on,
+    // a bit", which is the one thing this position is not. The slash is
+    // what makes it legible without reading the words under it.
+    //
+    // This name is in Adwaita, so it survives on a machine that is not
+    // running the icon theme this was built against.
+    let off_icon = gtk::Image::from_icon_name("night-light-disabled-symbolic");
+    off_icon.set_pixel_size(OFF_ICON_PX);
+    off_icon.set_opacity(OFF_ICON_OPACITY);
+    off_icon.set_margin_bottom(OFF_ICON_GAP_PX);
+    off_icon.set_accessible_role(gtk::AccessibleRole::Presentation);
+
+    let off_title = gtk::Label::new(Some("Backlight off"));
+    off_title.add_css_class("title-2");
+
+    let off_body = gtk::Label::new(Some("Pick a slot to start editing lighting."));
+    off_body.add_css_class("dim-label");
+    off_body.set_wrap(true);
+    off_body.set_justify(gtk::Justification::Center);
+
+    let off_state = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    off_state.set_halign(gtk::Align::Center);
+    off_state.set_valign(gtk::Align::Center);
+    off_state.set_vexpand(true);
+    off_state.append(&off_icon);
+    off_state.append(&off_title);
+    off_state.append(&off_body);
+    // Built hidden: state arrives after the window does, and a mark that
+    // flashes over a lit page is worse than one that waits.
+    off_state.set_visible(false);
+    content.append(&off_state);
+
     let clamp = adw::Clamp::new();
     clamp.set_maximum_size(560);
     clamp.set_child(Some(&content));
@@ -341,13 +414,17 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     LightingPage {
         root: scrolled.upcast(),
         preview,
+        preview_box,
         slot_label,
+        off_state,
         slot_buttons,
         off_button,
         slot_note,
         effect_row,
+        effect_group,
         zone_buttons,
         colors_group,
+        options_group,
         speed_row,
         brightness_row,
         direction_row,

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Linux Native Lenovo keyboard RGB. Tiny runtime more effects.**
+**Beautiful Linux Native RGB controls for Legion**
 
 <p>
   <a href="docs/quick-start.md"><img src="https://img.shields.io/badge/-Quick_start-ff2740?style=for-the-badge" alt="Quick start" /></a>&nbsp;
@@ -19,135 +19,131 @@
 
 </div>
 
-
 https://github.com/user-attachments/assets/104b2c9e-340e-448c-b0f4-6f60c13d4f3a
 
-<!-- <div align="center"> -->
-  <!-- <img src="docs/screenshot.png" alt="Aurora GTK4 interface" width="560"/> -->
-  <!-- <img width="563" height="633" alt="Aurora GTK4 interface" src="https://github.com/user-attachments/assets/c4cd4b50-23cb-499e-a308-e242b8be4fe2" /> -->
-<!-- </div> -->
+<p align="center">
+  Aurora gives Legion users on Linux a native app to control every lighting slot
+  and choose from a wider range of effects.<br />
+  Your lighting stays alive after you close the app, using fewer resources in the background.
+</p>
 
+> [!IMPORTANT]
+> Aurora supports select 4-zone RGB keyboards in Lenovo Legion, IdeaPad
+> and LOQ laptops from 2020 through 2024. Check the
+> [exact USB IDs](driver/src/lib.rs) before installing.
 
+<p align="center">
+  <em>Aurora would not exist without
+  <a href="https://github.com/4JX/L5P-Keyboard-RGB">L5P-Keyboard-RGB</a>, whose
+  hardware research, driver and effects laid the foundation.</em>
+</p>
 
-Aurora controls 4-zone RGB keyboards in select Lenovo Legion, IdeaPad
-and LOQ laptops. A small daemon owns the lighting. The native GTK app
-and CLI can close without stopping it.
-
-Aurora supports controllers from 2020 through 2024. See
-[`driver/src/lib.rs`](driver/src/lib.rs) for exact USB IDs.
-
-## Start
-
-On NixOS, add the flake input and pick one of the two setups:
-
-```nix
-# flake inputs
-aurora.url = "github:HughScott2002/Aurora-Legion";
-```
-
-**Without home-manager.** One option installs the package, the udev
-rules, and the daemon as a systemd user service:
-
-```nix
-# nixos configuration
-imports = [ aurora.nixosModules.default ];
-services.aurora.enable = true;
-```
-
-**With home-manager.** Run the daemon per-user; the NixOS side only
-grants keyboard access:
-
-```nix
-# home-manager: run the daemon at login
-imports = [ aurora.homeModules.default ];
-services.aurora.enable = true;
-
-# nixos: let your user open the keyboard without root
-imports = [ aurora.nixosModules.default ];
-hardware.aurora.enable = true;
-```
-
-To try it without installing, start the daemon and then the GUI:
-
-```console
-$ nix run github:HughScott2002/Aurora-Legion#daemon &
-$ nix run github:HughScott2002/Aurora-Legion
-```
-
-The [quick start](docs/quick-start.md) takes you from launch to a visible
-profile. For NixOS, AppImage, tarball and source installs, use the
-[documentation map](docs/README.md).
+<br />
 
 ## Why Aurora
 
-Lenovo Vantage does not run on Linux.
-[L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB) made these
-keyboards controllable, but its interface and software effects share
-one process. Close that process and animated effects stop.
+On Linux, Legion lighting can mean limited slots, an app that has to
+stay open, or firmware colours returning when you press Fn+Space.
+Aurora fixes those rough edges.
 
-Aurora keeps profiles and effects in a persistent daemon.
+### Three slots. Three looks.
 
-| Capability | L5P-Keyboard-RGB 0.20.8 | Aurora |
-| --- | --- | --- |
-| Lighting lifetime | Animated effects need the app | Effects continue after the GUI closes |
-| Fn+Space | Not detected; the key shows firmware lighting instead of yours | Detected; each slot keeps its own lighting |
-| Slots per profile | One lighting configuration | Three, one per Fn+Space slot |
-| Choosing a slot | The keyboard's own cycle only | Keyboard, app, or `aurora slot 2` |
-| Startup | Manual | Profile restored by a user service |
-| Interface | egui | Native GTK4 and libadwaita |
-| CLI | Separate state | Shared daemon state |
-| Other clients | None | Versioned JSON protocol on a unix socket |
-| Unsupported machine | Fails quietly | Each optional feature reports its own state and reason |
-| Settings | Working-directory JSON | XDG config, atomic writes, never erased on a read failure |
-| Keyboard unplug | Can panic an effect thread | Reports failure and reacquires |
+Each profile saves a different look for all three Fn+Space slots. Cycle
+them from the keyboard or choose one in the app.
 
-## Fn+Space keeps your lighting
+<br />
 
-The keyboard has three lighting slots of its own plus off, and Fn+Space
-cycles them. The embedded controller owns them, applies its own stored
-lighting on each press, and offers no command to set or select a slot.
+### Close the app. Keep the lighting.
 
-Software that only writes to the keyboard never sees any of this. Press
-the key and the firmware's lighting replaces yours; edit a colour and it
-lands in whichever slot happens to be active. In practice you get one
-usable slot out of three.
+Your profile and animated effects keep running after the window closes.
 
-Aurora listens for the event the controller raises, and keeps a lighting
-per slot:
+<br />
 
-```console
-$ aurora slot 2
-slot 2 selected
+### Small in the background.
+
+With static lighting, Aurora's daemon used about one-eighth the memory
+of L5P-Keyboard-RGB's resident app in same-day tests.
+
+<br />
+
+### Side-by-side comparison
+
+| What matters         | L5P-Keyboard-RGB 0.20.8      | Aurora                             |
+| -------------------- | ---------------------------- | ---------------------------------- |
+| After the app closes | Animated effects stop        | Profiles and effects keep running  |
+| Fn+Space slots       | Firmware lighting takes over | All three slots keep your lighting |
+| Choosing a slot      | Keyboard cycle only          | Keyboard, app, or CLI              |
+| Startup              | Manual                       | Last profile restored by a service |
+| Interface            | egui                         | Native GTK4 and libadwaita         |
+| Static memory        | 92.5 MiB                     | 11.5 MiB                           |
+
+---
+
+## Install Aurora
+
+> [!CAUTION]
+> Aurora is open source and provided without warranty. Check that your
+> device is supported, inspect the code if you wish, and use it at your
+> own risk.
+
+Choose the path that matches your system:
+
+### NixOS
+
+Use the NixOS module, with or without Home Manager.
+[Open the NixOS installation guide](docs/how-to/install-nixos.md).
+
+### Other Linux
+
+Use the AppImage for the shortest install or the tarball for a native
+binary and user service.
+[Open the Linux installation guide](docs/how-to/install-linux.md).
+
+### Build from source
+
+Build Aurora with Nix or a native Rust toolchain.
+[Open the source build guide](docs/how-to/build-from-source.md).
+
+<br />
+
+### Coding agent
+
+Give your coding agent this prompt:
+
+```text
+Install Aurora on this computer by following
+https://raw.githubusercontent.com/HughScott2002/Aurora-Legion/main/docs/install-with-ai.md
+Inspect my system first, choose one supported installation method, verify
+the daemon and keyboard connection, then tell me what changed and how to
+uninstall it.
 ```
 
-A profile holds all three. Save one profile and you have saved three
-looks, reachable from the keyboard without opening anything.
+---
 
-The evidence behind this, including the approaches that do not work and
-why polling the slot counter is one of them, is in
-[Fn+Space synchronization](docs/explanation/fn-space-sync.md) and the
-[hardware research](docs/research/ite8295-hardware-profiles.md).
+## For the curious
 
-## Measured
+### Performance measurements
 
 Both projects were built and measured on the same machine on the same
-day, through the same Nix pipeline. The resident comparison uses
-L5P-Keyboard-RGB's GUI and Aurora's daemon, because those are the
-processes that have to stay alive for the lights to stay on. See the
-[method and raw data](docs/measurements.md).
+day through the same Nix pipeline. The resident comparison uses
+L5P-Keyboard-RGB's GUI and Aurora's daemon because those are the
+processes that must stay alive for animated lighting.
 
-| Metric | L5P-Keyboard-RGB 0.20.8 | Aurora | Verdict |
-| --- | --- | --- | --- |
-| Resident memory, Static | 92.5 MiB | 11.5 MiB | ✅ 8× smaller |
-| Resident memory, Swipe | 92.2 MiB | 11.5 MiB | ✅ 8× smaller |
-| Resident CPU, idle | 0.13% | 0.05% | ✅ 2.6× lower |
-| Resident CPU, Swipe | 0.52% | 0.50% | ➖ the same, it is the same code |
-| Binaries on disk | 26.6 MB | 8.7 MB daemon and 2.7 MB GUI | ✅ 2.3× smaller combined |
-| GUI while open | 92.5 MiB, always | 85.2 MiB, until you close it | ✅ lighter and transient |
+| Metric                  | L5P-Keyboard-RGB 0.20.8 | Aurora                       |
+| ----------------------- | ----------------------- | ---------------------------- |
+| Resident memory, Static | 92.5 MiB                | 11.5 MiB                     |
+| Resident memory, Swipe  | 92.2 MiB                | 11.5 MiB                     |
+| Resident CPU, idle      | 0.13%                   | 0.05%                        |
+| Resident CPU, Swipe     | 0.52%                   | 0.50%                        |
+| Binaries on disk        | 26.6 MB                 | 8.7 MB daemon and 2.7 MB GUI |
+| GUI while open          | 92.5 MiB                | 85.2 MiB                     |
 
-Measured 2026-07-27. 
+Measured 2026-07-27. Read the [method and raw data](docs/measurements.md)
+for the full context.
 
-## How it works
+<br />
+
+### How Aurora works
 
 ```mermaid
 graph LR
@@ -157,12 +153,15 @@ graph LR
     SD["systemd user service"] -. "starts at login" .-> D
 ```
 
-The daemon core module alone mutates state. Other daemon modules send
-bounded commands to its interface. The protocol crate defines the
-UI-free client seam; the GUI and CLI are adapters at that seam.
+The daemon owns the lighting, profiles and effects. The GUI and CLI send
+it commands, so they can close without taking your lighting with them.
 
 Read [Architecture](docs/explanation/architecture.md) for the design or
-[IPC protocol](docs/protocol.md) to build another client.
+[IPC protocol](docs/protocol.md) to build another client. The deeper
+Fn+Space details live in [Fn+Space synchronization](docs/explanation/fn-space-sync.md)
+and the [hardware research](docs/research/ite8295-hardware-profiles.md).
+
+---
 
 ## Community
 

@@ -195,6 +195,11 @@ pub struct ResponseEnvelope {
     pub resp: Response,
 }
 
+// `State` carries a whole `DaemonState` and dwarfs the other variants.
+// Boxing it would silence the lint, but a `Response` is built once per IPC
+// reply and dropped, never held in a collection, so the size buys nothing
+// back and the indirection would only obscure the type.
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
 pub enum Response {

@@ -80,38 +80,37 @@ impl EffectManager {
             command_tx,
         };
 
-        let inner_handle = thread::spawn(move || loop {
+        let inner_handle = thread::spawn(move || {
             // Block until a message arrives: while a hardware effect is
             // showing, this thread is fully asleep. (Issue #1: the old
             // 20 ms poll here woke fifty times a second for nothing.)
-            let first = match inner.rx.recv() {
-                Ok(message) => message,
-                Err(_) => break, // Every sender is gone; nothing left to run.
-            };
+            // recv() fails only once every sender is gone, and that ends
+            // the loop: there is nothing left to run.
+            while let Ok(first) = inner.rx.recv() {
+                // Coalesce the backlog: each message fully replaces the
+                // keyboard state, so only the newest one needs to run. Exit
+                // must never be coalesced away.
+                let mut newest = first;
+                let mut exit_seen = matches!(newest, Message::Exit);
+                for message in inner.rx.try_iter() {
+                    if matches!(message, Message::Exit) {
+                        exit_seen = true;
+                    }
+                    newest = message;
+                }
+                if exit_seen {
+                    break;
+                }
 
-            // Coalesce the backlog: each message fully replaces the keyboard
-            // state, so only the newest one needs to run. Exit must never be
-            // coalesced away.
-            let mut newest = first;
-            let mut exit_seen = matches!(newest, Message::Exit);
-            for message in inner.rx.try_iter() {
-                if matches!(message, Message::Exit) {
-                    exit_seen = true;
+                match newest {
+                    Message::Lighting { lighting } => {
+                        inner.set_lighting(lighting);
+                    }
+                    Message::CustomEffect { effect } => {
+                        inner.play_custom_effect(&effect);
+                    }
+                    Message::Exit => break,
                 }
-                newest = message;
-            }
-            if exit_seen {
-                break;
-            }
-
-            match newest {
-                Message::Lighting { lighting } => {
-                    inner.set_lighting(lighting);
-                }
-                Message::CustomEffect { effect } => {
-                    inner.play_custom_effect(&effect);
-                }
-                Message::Exit => break,
             }
         });
 

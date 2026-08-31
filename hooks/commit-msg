@@ -1,0 +1,28 @@
+#!/bin/sh
+# Commit-msg gate: no AI attribution trailers enter this repo's history.
+#
+# Claude Code's `attribution` setting is supposed to suppress these and does
+# not do so reliably (anthropics/claude-code#45137), so the block lives here,
+# where a commit cannot get past it by accident. Enable once per clone with:
+#   git config core.hooksPath hooks
+# Bypass for emergencies:
+#   git commit --no-verify
+
+message_file="$1"
+
+# Matched at the start of a line, case-insensitively: that is where git writes
+# trailers and how git parses them back out. Only Claude's own trailers are
+# blocked, so a genuine human Co-Authored-By still goes through.
+trailer_pattern='^(Co-Authored-By:[[:space:]]*Claude|Claude-Session:)'
+
+offenders=$(grep -inE "$trailer_pattern" "$message_file")
+
+if [ -n "$offenders" ]; then
+    echo "commit-msg: AI attribution trailer in the commit message." >&2
+    echo "$offenders" >&2
+    echo "" >&2
+    echo "Delete the line and commit again." >&2
+    exit 1
+fi
+
+exit 0

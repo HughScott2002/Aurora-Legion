@@ -38,11 +38,15 @@ $ systemctl --user stop aurora
 Inside `nix develop`, with `CXXFLAGS` still set:
 
 ```console
+$ cargo clippy --workspace --all-targets \
+    --features aurora/scrap-pkg-config -- -D warnings
 $ cargo test --workspace --features aurora/scrap-pkg-config
-$ nix build
+$ cargo build --workspace --features aurora/scrap-pkg-config
 ```
 
-`nix build` is the required pre-push gate.
+Those three are the pre-push gate, and `hooks/pre-push` runs them for
+you. `nix build` produces the packaged build that the release workflow
+ships. Run it before a release, but it is not part of the gate.
 
 ## Build on Ubuntu 24.04
 

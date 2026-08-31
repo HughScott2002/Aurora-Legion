@@ -31,7 +31,11 @@ first-party tool on the desktop they target.
       unplugged, permission missing. Every failure visible and
       recoverable from the UI. Issue: #5
 - [ ] Wayland-native hotkeys via the XDG GlobalShortcuts portal,
-      replacing evdev polling; works on any Wayland compositor. Issue: #6
+      replacing evdev polling; works on any Wayland compositor. Briefly
+      settled on 2026-08-18 by removing the evdev hotkey instead, but
+      the hotkey was restored on 2026-08-29, so the port is outstanding
+      again. `aurora cycle-profile` bound to a desktop shortcut is the
+      reliable path meanwhile. Issue: #6
 - [ ] Ambient effect reliability on Wayland: survive portal
       re-authorization, degrade gracefully with clear UI state when
       capture is unavailable. Issue: #7

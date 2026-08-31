@@ -24,9 +24,15 @@ lit keys are the real output, at a fidelity no widget can match, and a
 duplicate on screen is always the worse copy.
 
 The keyboard preview earns its place only when the laptop is not in
-front of you or the backlight is off. It is a reference, not the point
-of the page. Colour chips beside a slot picker are not a reference; they
-compete with the thing they describe. That is why they are gone.
+front of you. It is a reference, not the point of the page. Colour chips
+beside a slot picker are not a reference; they compete with the thing
+they describe. That is why they are gone.
+
+With the backlight off there is nothing to reference. The preview card
+and its caption are removed there, not emptied: a card still on screen
+with nothing in it reads as a rendering fault. What takes the space is a
+single faded mark in the middle of the window, and the slot picker stays
+where it always is, because it is the way out.
 
 This rule is Aurora's own. No general guide would produce it, because
 most apps do not sit next to their output device.

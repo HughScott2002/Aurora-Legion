@@ -8,18 +8,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `aurora status` and the app's Settings page now say when the running
-  daemon is older than the installed build. A package upgrade replaces
-  the binaries but does not restart a running daemon, so the old one
-  keeps serving until it is restarted or the session ends, and nothing
-  said so. Across a protocol change that looked like a broken install.
+- `aurora status` and Settings flag a daemon older than the installed
+  build.
+
+### Changed
+
+- Controls a position cannot use are removed, not greyed out. Backlight
+  off hides Effect, Zone Colors, Options, Ambient and Swipe.
+- Backlight off replaces the keyboard preview with a faded mark.
+- Off leads the slot picker.
+- The app icon is the real Aurora mark, and declares an intrinsic size
+  so it renders in tools that rasterise without a viewport (#2).
 
 ### Fixed
 
-- The permission-denied hint pointed at an anchor that does not exist
-  (`quick-start.md#keyboard-access`). It now points at the real heading
-  in the install guide. This is the one link shown on the exact failure
-  a missing udev rule produces.
+- Permission-denied hint linked a dead anchor.
 
 ## [0.24.1] - 2026-07-27
 
