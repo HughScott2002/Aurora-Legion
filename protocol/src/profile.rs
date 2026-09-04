@@ -24,6 +24,13 @@ pub const ZONE_COUNT: usize = 4;
 pub const COLOR_CHANNELS_PER_ZONE: usize = 3;
 pub const COLOR_BYTE_COUNT: usize = ZONE_COUNT * COLOR_CHANNELS_PER_ZONE;
 
+/// A full battery, in the percent the kernel reports.
+pub const FULL_CHARGE_PERCENT: u8 = 100;
+
+/// How much charge one zone of the battery gauge stands for. Four zones
+/// over a full battery, so 25 points each.
+pub const ZONE_CHARGE_SPAN: u32 = FULL_CHARGE_PERCENT as u32 / ZONE_COUNT as u32;
+
 /// Fn+Space lighting slots per profile. The controller cycles these three
 /// plus an off position; see [`crate::ipc::SlotSelection`].
 pub const SLOT_COUNT: usize = 3;
@@ -89,6 +96,46 @@ impl Lighting {
         }
 
         colors
+    }
+
+    /// The color payload for a battery gauge at `percent`: this slot's own
+    /// colors, dimmed zone by zone so the lit part of the keyboard is the
+    /// part of the charge that is left.
+    ///
+    /// The four zones split the battery evenly and empty right to left, so
+    /// zone 4 stands for the top 25 points and zone 1 for the last 25. A
+    /// zone only partly inside the remaining charge is drawn at that
+    /// fraction of its color, which is what lets the gauge move
+    /// continuously instead of stepping four times over a whole discharge.
+    ///
+    /// The effect chooses nothing here. Every color comes from the slot the
+    /// user set up, and all this does is decide how much of each survives.
+    ///
+    /// Lives in the protocol crate because two places have to agree on the
+    /// answer: the daemon writes it to the keyboard, and the app draws it
+    /// in the preview. Two implementations would eventually disagree, and
+    /// the disagreement would look like a rendering bug.
+    pub fn battery_gauge_array(&self, percent: u8) -> [u8; COLOR_BYTE_COUNT] {
+        let full = self.rgb_array();
+        let mut dimmed: [u8; COLOR_BYTE_COUNT] = [0; COLOR_BYTE_COUNT];
+
+        // Kernel input reaches this, so clamp rather than assert.
+        let charge = u32::from(percent.min(FULL_CHARGE_PERCENT));
+
+        for zone_index in 0..ZONE_COUNT {
+            // Charge this zone starts filling at: 0, 25, 50, 75.
+            let zone_floor = zone_index as u32 * ZONE_CHARGE_SPAN;
+            let charge_in_zone = charge.saturating_sub(zone_floor).min(ZONE_CHARGE_SPAN);
+
+            let byte_offset = zone_index * COLOR_CHANNELS_PER_ZONE;
+            for channel_index in 0..COLOR_CHANNELS_PER_ZONE {
+                let channel = u32::from(full[byte_offset + channel_index]);
+                let scaled = channel * charge_in_zone / ZONE_CHARGE_SPAN;
+                dimmed[byte_offset + channel_index] = scaled as u8;
+            }
+        }
+
+        dimmed
     }
 
     /// A slot filled with one solid color on every zone. Used for the
@@ -296,6 +343,81 @@ mod tests {
 
         // Lighting that no slot holds.
         assert_eq!(profile.slot_showing(&Lighting::solid([9, 9, 9])), None);
+    }
+
+    #[test]
+    fn a_full_battery_leaves_every_zone_alone() {
+        let lighting = Lighting::solid([255, 128, 0]);
+
+        assert_eq!(
+            lighting.battery_gauge_array(100),
+            lighting.rgb_array(),
+            "a full gauge is the user's own lighting, untouched"
+        );
+    }
+
+    #[test]
+    fn an_empty_battery_leaves_nothing_lit() {
+        let lighting = Lighting::solid([255, 128, 0]);
+
+        assert_eq!(lighting.battery_gauge_array(0), [0; COLOR_BYTE_COUNT]);
+    }
+
+    /// The gauge empties right to left, so the rightmost zone is the first
+    /// to go dark and the leftmost is the last.
+    #[test]
+    fn the_gauge_empties_from_the_right() {
+        let lighting = Lighting::solid([200, 200, 200]);
+
+        let half = lighting.battery_gauge_array(50);
+        assert_eq!(&half[0..3], &[200, 200, 200], "zone 1 is still full");
+        assert_eq!(&half[3..6], &[200, 200, 200], "zone 2 is still full");
+        assert_eq!(&half[6..9], &[0, 0, 0], "zone 3 is out");
+        assert_eq!(&half[9..12], &[0, 0, 0], "zone 4 went first");
+    }
+
+    /// Whole-zone steps would move four times over a whole discharge, which
+    /// is not a gauge. The zone straddling the charge line is dimmed.
+    #[test]
+    fn the_zone_on_the_charge_line_is_part_lit() {
+        let lighting = Lighting::solid([100, 0, 0]);
+
+        // 60%: zones 1 and 2 full, zone 3 ten points into its span of 25.
+        let gauge = lighting.battery_gauge_array(60);
+        assert_eq!(&gauge[0..3], &[100, 0, 0]);
+        assert_eq!(&gauge[3..6], &[100, 0, 0]);
+        assert_eq!(&gauge[6..9], &[40, 0, 0]);
+        assert_eq!(&gauge[9..12], &[0, 0, 0]);
+    }
+
+    /// The effect dims the user's colors and picks none of its own, so a
+    /// zone the user turned off stays off at every charge.
+    #[test]
+    fn the_gauge_keeps_the_users_own_colors() {
+        let mut lighting = Lighting::default();
+        lighting.rgb_zones[0].rgb = [10, 20, 30];
+        lighting.rgb_zones[1].rgb = [40, 50, 60];
+        lighting.rgb_zones[2].rgb = [70, 80, 90];
+        lighting.rgb_zones[3].rgb = [255, 255, 255];
+        lighting.rgb_zones[3].enabled = false;
+
+        let gauge = lighting.battery_gauge_array(100);
+        assert_eq!(&gauge[0..3], &[10, 20, 30]);
+        assert_eq!(&gauge[3..6], &[40, 50, 60]);
+        assert_eq!(&gauge[6..9], &[70, 80, 90]);
+        assert_eq!(&gauge[9..12], &[0, 0, 0], "a disabled zone stays dark");
+    }
+
+    /// The percent comes from sysfs, so a nonsense value must clamp rather
+    /// than wrap the arithmetic or panic.
+    #[test]
+    fn a_charge_above_full_is_clamped() {
+        let lighting = Lighting::solid([255, 255, 255]);
+
+        assert_eq!(
+            lighting.battery_gauge_array(255),
+            lighting.battery_gauge_array(100)
+        );
     }
 
     /// Structural equality is what change detection needs. The old

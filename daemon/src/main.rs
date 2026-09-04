@@ -114,7 +114,9 @@ fn run_daemon() {
     let battery_dir = battery::probe();
     match &battery_dir {
         Some(path) => eprintln!("aurora: watching battery {}", path.display()),
-        None => eprintln!("aurora: no battery found, the low battery alert is off"),
+        None => {
+            eprintln!("aurora: no battery found, the low battery alert and Battery effect are off")
+        }
     }
 
     // The core loop runs on the main thread until a signal or a Shutdown

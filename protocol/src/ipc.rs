@@ -28,9 +28,10 @@ pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// see `docs/protocol.md` for the negotiation rules.
 /// Version 2 moved the lighting configuration from `Profile` into
 /// `Profile::slots`, so a v1 client would misread every profile it receives.
-/// Version 3 added the low-battery alert: `DaemonState` gained
-/// `battery_available` and `battery_alert`, which a v3 client requires and
-/// a v2 daemon does not send.
+/// Version 3 added the battery features: `DaemonState` gained
+/// `battery_available`, `battery_alert`, `battery_alert_active` and
+/// `battery_percent`, which a v3 client requires and a v2 daemon does not
+/// send, and `Effects` gained `Battery`, which a v2 daemon cannot run.
 pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Upper bound on saved profiles and custom effects. Without these the
@@ -401,6 +402,12 @@ pub struct DaemonState {
     /// chose, so a client that draws the keyboard must consult this or it
     /// will claim a look the hardware is not showing.
     pub battery_alert_active: bool,
+    /// The charge last read, or `None` on a machine without a battery.
+    /// Present so a client drawing the keyboard can draw the Battery
+    /// effect's gauge; the daemon reads the same value for itself and does
+    /// not need this field. Sampled every few seconds, so treat it as
+    /// recent rather than instantaneous.
+    pub battery_percent: Option<u8>,
 }
 
 #[cfg(test)]
@@ -433,6 +440,7 @@ mod tests {
             battery_available: true,
             battery_alert: true,
             battery_alert_active: false,
+            battery_percent: Some(53),
         }
     }
 

@@ -9,7 +9,7 @@
 | --- | --- |
 | `aurora daemon` | Run the daemon in the foreground. |
 | `aurora set` | Build and apply lighting from command-line options. |
-| `aurora list` | List the 13 built-in effects. |
+| `aurora list` | List the built-in effects this machine can run. |
 | `aurora status` | Show daemon, keyboard, profile and Fn+Space slot state. |
 | `aurora cycle-profile` | Apply the next profile saved through the GUI. |
 | `aurora slot` | Show or change the active Fn+Space slot. |
@@ -107,10 +107,14 @@ Christmas
 Fade
 Temperature
 Ripple
+Battery
 ```
 
 `Static`, `Breath`, `Smooth` and `Wave` run on the keyboard. See
 [Effects](../protocol.md#effects) for parameters and color behavior.
+
+`Battery` needs a battery. On a machine without one the daemon refuses
+it, and `aurora list` leaves it out.
 
 ## File commands
 

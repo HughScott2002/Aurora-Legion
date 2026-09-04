@@ -12,13 +12,12 @@ use std::{
 use aurora_protocol::{
     effects::{Brightness, Direction, Effects, SwipeMode},
     ipc::{DaemonState, KeyboardStatus, Request, SlotSelection, SubsystemState},
-    profile::{Lighting, SLOT_COUNT},
+    profile::{Lighting, COLOR_CHANNELS_PER_ZONE, SLOT_COUNT},
 };
 use relm4::{
     adw::{self, prelude::*},
     gtk, ComponentParts, ComponentSender, SimpleComponent,
 };
-use strum::IntoEnumIterator;
 
 use crate::{
     daemon_actions,
@@ -341,7 +340,7 @@ impl SimpleComponent for App {
             AppMsg::Ipc(update) => self.handle_ipc_update(update, &sender),
 
             AppMsg::EffectSelected(index) => {
-                let Some(selected) = effect_by_index(index) else {
+                let Some(selected) = effect_by_index(self.battery_available(), index) else {
                     return;
                 };
                 // Reselecting the same effect is a no-op even when its
@@ -885,6 +884,16 @@ impl App {
         self.ipc.send(Request::PlayCustomEffect { effect });
     }
 
+    /// Whether this machine has a battery, per the daemon. False before
+    /// state arrives, which is the safe way round: the effects that need
+    /// one stay out of the picker until the daemon confirms it.
+    fn battery_available(&self) -> bool {
+        match &self.state {
+            Some(state) => state.battery_available,
+            None => false,
+        }
+    }
+
     fn sync_lighting_page(&self, page: &lighting::LightingPage) {
         // Nothing on this page can be decided without the daemon's slot, so
         // the whole sync waits for state rather than syncing the editors
@@ -900,12 +909,12 @@ impl App {
         // level up.
         let slot_is_lit = active_slot.index().is_some();
 
-        // Effect combo.
-        if let Some(index) = effect_index(self.lighting.effect) {
-            if page.effect_row.selected() != index as u32 {
-                page.effect_row.set_selected(index as u32);
-            }
-        }
+        // Effect combo. The list and the selection go together: the
+        // selection is a position in the list, so they are never allowed to
+        // be out of step, not even for one signal.
+        let effect_names = lighting::effect_names(state.battery_available);
+        let selected_effect = effect_index(state.battery_available, self.lighting.effect);
+        page.set_effects(&effect_names, selected_effect);
 
         // Zone colors.
         for (button, zone) in page.zone_buttons.iter().zip(self.lighting.rgb_zones.iter()) {
@@ -1070,7 +1079,7 @@ impl App {
             let preview_colors = if state.battery_alert_active {
                 [BATTERY_ALERT_PREVIEW_COLOR; 4]
             } else {
-                preview_zone_colors(&self.lighting)
+                preview_zone_colors(&self.lighting, state.battery_percent)
             };
             page.preview.set_colors(preview_colors);
 
@@ -1089,9 +1098,32 @@ impl App {
 /// Zone colours for the preview, or black for effects that do not use
 /// them. Showing the stored zone colours under a rainbow effect was the
 /// preview claiming something the keyboard was not doing.
-fn preview_zone_colors(lighting: &Lighting) -> [[u8; 3]; 4] {
+///
+/// The Battery effect is the same rule one step further: it uses the zone
+/// colours, but dims them, so the preview dims them too.
+///
+/// With no charge to draw at, the preview falls through to the undimmed
+/// colours, because that is what the daemon puts on the keyboard when it
+/// cannot read a charge either. Drawing darkness here would be the app
+/// contradicting the hardware, which is the whole reason this function
+/// takes the effect into account at all.
+fn preview_zone_colors(lighting: &Lighting, battery_percent: Option<u8>) -> [[u8; 3]; 4] {
     let mut colors: [[u8; 3]; 4] = [[0; 3]; 4];
     if !lighting.effect.takes_color_array() {
+        return colors;
+    }
+
+    if let (true, Some(percent)) = (lighting.effect.needs_a_battery(), battery_percent) {
+        let gauge = lighting.battery_gauge_array(percent);
+        for (zone_index, target) in colors.iter_mut().enumerate() {
+            let byte_offset = zone_index * COLOR_CHANNELS_PER_ZONE;
+            *target = [
+                gauge[byte_offset],
+                gauge[byte_offset + 1],
+                gauge[byte_offset + 2],
+            ];
+        }
+
         return colors;
     }
 
@@ -1113,10 +1145,12 @@ fn active_lighting(state: &DaemonState) -> Lighting {
     }
 }
 
-/// Effects in `Effects::iter()` order with usable defaults for the
-/// field-carrying variants (the iterator yields zeroed fields).
-fn effect_by_index(index: usize) -> Option<Effects> {
-    let effect = Effects::iter().nth(index)?;
+/// The effect at a combo row position, with usable defaults for the
+/// field-carrying variants (the picker's list yields zeroed fields).
+fn effect_by_index(battery_available: bool, index: usize) -> Option<Effects> {
+    let effect = lighting::selectable_effects(battery_available)
+        .into_iter()
+        .nth(index)?;
 
     let with_defaults = match effect {
         Effects::AmbientLight { .. } => Effects::AmbientLight {
@@ -1137,8 +1171,11 @@ fn effect_by_index(index: usize) -> Option<Effects> {
     Some(with_defaults)
 }
 
-fn effect_index(effect: Effects) -> Option<usize> {
-    for (index, candidate) in Effects::iter().enumerate() {
+fn effect_index(battery_available: bool, effect: Effects) -> Option<usize> {
+    for (index, candidate) in lighting::selectable_effects(battery_available)
+        .into_iter()
+        .enumerate()
+    {
         if candidate.same_variant(effect) {
             return Some(index);
         }

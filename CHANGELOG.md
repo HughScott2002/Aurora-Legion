@@ -11,13 +11,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Low battery alert: the keyboard turns red below 15 percent on
   battery, and returns to your lighting when you plug in. Settings has a
   switch for it, hidden on machines without a battery.
+- Battery effect: the keyboard as a charge gauge, dimming from the right
+  as the battery drains. It uses your own zone colours and only decides
+  how much of each survives. Offered only where there is a battery.
 - `aurora status` and Settings flag a daemon older than the installed
   build.
 
 ### Changed
 
-- Protocol version 3: `DaemonState` gained `battery_available` and
-  `battery_alert`, and `SetBatteryAlert` was added.
+- Protocol version 3: `DaemonState` gained `battery_available`,
+  `battery_alert`, `battery_alert_active` and `battery_percent`,
+  `Effects` gained `Battery`, and `SetBatteryAlert` was added.
 - Controls a position cannot use are removed, not greyed out. Backlight
   off hides Effect, Zone Colors, Options, Ambient and Swipe.
 - Backlight off replaces the keyboard preview with a faded mark.

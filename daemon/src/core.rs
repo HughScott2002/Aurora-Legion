@@ -152,6 +152,11 @@ pub struct Core {
     /// being on; see [`Core::battery_alert_is_showing`]. Never persisted:
     /// this is a fact about the battery, not a setting.
     battery_alert_active: bool,
+    /// The charge last read, or `None` before the first read and on a
+    /// machine without a battery. Reported to clients so the app can draw
+    /// the Battery effect's gauge; the effect itself reads sysfs directly
+    /// on the engine thread and does not use this.
+    battery_percent: Option<u8>,
     /// When the battery is next due to be read.
     battery_read_at: Instant,
 
@@ -191,6 +196,7 @@ pub fn run(
         screen_capture: SubsystemState::Inactive,
         battery_dir,
         battery_alert_active: false,
+        battery_percent: None,
         // Read on the first tick rather than after one interval, so a
         // daemon started on a nearly flat battery warns immediately.
         battery_read_at: Instant::now(),
@@ -273,6 +279,7 @@ impl Core {
                     *keyboard,
                     self.stop_signals.clone(),
                     Some(self.command_tx.clone()),
+                    self.battery_dir.clone(),
                 );
                 self.engine = Some(engine);
                 self.slot_reader = Some(slot_reader);
@@ -486,8 +493,17 @@ impl Core {
             return;
         };
 
+        let charge_moved = self.battery_percent != Some(reading.percent);
+        self.battery_percent = Some(reading.percent);
+
         let alert_holds = battery_alert_holds(self.settings.battery_alert, reading);
         if alert_holds == self.battery_alert_active {
+            // The alert has nothing new to say. The charge still might: a
+            // client drawing the Battery gauge reads it from state, so a
+            // percent that moved has to reach the client that draws it.
+            if charge_moved {
+                self.broadcast_state();
+            }
             return;
         }
 
@@ -619,7 +635,7 @@ impl Core {
             );
         };
 
-        if let Some(rejection) = validate_lighting(&lighting) {
+        if let Some(rejection) = validate_lighting(&lighting, self.battery_dir.is_some()) {
             return rejection;
         }
 
@@ -637,7 +653,7 @@ impl Core {
     }
 
     fn set_profile(&mut self, profile: Profile) -> Response {
-        if let Some(rejection) = validate_profile(&profile) {
+        if let Some(rejection) = validate_profile(&profile, self.battery_dir.is_some()) {
             return rejection;
         }
 
@@ -703,7 +719,7 @@ impl Core {
         if let Some(rejection) = validate_name(&name, "profile") {
             return rejection;
         }
-        if let Some(rejection) = validate_profile(&profile) {
+        if let Some(rejection) = validate_profile(&profile, self.battery_dir.is_some()) {
             return rejection;
         }
 
@@ -899,6 +915,7 @@ impl Core {
             battery_available: self.battery_dir.is_some(),
             battery_alert: self.settings.battery_alert,
             battery_alert_active: self.battery_alert_is_showing(),
+            battery_percent: self.battery_percent,
         }
     }
 
@@ -1092,9 +1109,9 @@ fn validate_custom_effect(effect: &CustomEffect) -> Option<Response> {
     None
 }
 
-fn validate_profile(profile: &Profile) -> Option<Response> {
+fn validate_profile(profile: &Profile, battery_available: bool) -> Option<Response> {
     for lighting in &profile.slots {
-        if let Some(rejection) = validate_lighting(lighting) {
+        if let Some(rejection) = validate_lighting(lighting, battery_available) {
             return Some(rejection);
         }
     }
@@ -1102,8 +1119,23 @@ fn validate_profile(profile: &Profile) -> Option<Response> {
     None
 }
 
-/// Returns `Some(error response)` when the lighting is out of range.
-fn validate_lighting(lighting: &Lighting) -> Option<Response> {
+/// Returns `Some(error response)` when the lighting is out of range, or asks
+/// for hardware this machine does not have.
+fn validate_lighting(lighting: &Lighting, battery_available: bool) -> Option<Response> {
+    // A profile file is portable and a battery is not, so a profile written
+    // on a laptop can reach a machine with nothing to gauge. Refusing it
+    // says so; running it would leave a keyboard lit at a charge that does
+    // not exist.
+    if lighting.effect.needs_a_battery() && !battery_available {
+        return Some(error_response(
+            ErrorKind::InvalidRequest,
+            &format!(
+                "the {} effect needs a battery, and this machine has none",
+                lighting.effect
+            ),
+        ));
+    }
+
     if !SOFTWARE_SPEED_RANGE.contains(&lighting.speed) {
         return Some(error_response(
             ErrorKind::InvalidRequest,
@@ -1147,8 +1179,12 @@ fn error_response(kind: ErrorKind, message: &str) -> Response {
 mod tests {
     use aurora_protocol::ipc::SlotSelection;
     use legion_rgb_driver::error::{Error, RangeError, RangeErrorKind};
+    use strum::IntoEnumIterator;
 
-    use super::{anchor_slot, battery, battery_alert_holds, BATTERY_ALERT_PERCENT};
+    use super::{
+        anchor_slot, battery, battery_alert_holds, validate_lighting, validate_profile, Effects,
+        Lighting, Profile, BATTERY_ALERT_PERCENT,
+    };
 
     fn reading(percent: u8, discharging: bool) -> battery::Reading {
         battery::Reading {
@@ -1186,6 +1222,60 @@ mod tests {
     #[test]
     fn the_switch_turns_the_alert_off_outright() {
         assert!(!battery_alert_holds(false, reading(1, true)));
+    }
+
+    /// A profile file is portable and a battery is not, so this is the
+    /// path a laptop profile takes when it is opened on a desktop.
+    #[test]
+    fn the_battery_effect_is_refused_where_there_is_no_battery() {
+        let lighting = Lighting {
+            effect: Effects::Battery,
+            ..Default::default()
+        };
+
+        assert!(validate_lighting(&lighting, false).is_some());
+        assert!(validate_lighting(&lighting, true).is_none());
+    }
+
+    /// One slot is enough to refuse the whole profile: applying it would
+    /// start the gauge as soon as that slot came round.
+    #[test]
+    fn one_battery_slot_refuses_the_whole_profile() {
+        let mut profile = Profile::default();
+        profile.slots[2].effect = Effects::Battery;
+
+        assert!(validate_profile(&profile, false).is_some());
+        assert!(validate_profile(&profile, true).is_none());
+    }
+
+    /// The rejection must be about the battery and nothing else; every
+    /// other effect has to survive a machine without one.
+    #[test]
+    fn every_other_effect_survives_a_machine_without_a_battery() {
+        for effect in Effects::iter() {
+            if effect.needs_a_battery() {
+                continue;
+            }
+
+            // The iterator yields zeroed fields, and ambient's are checked
+            // separately; give it the defaults a client would send.
+            let effect = match effect {
+                Effects::AmbientLight { .. } => Effects::AmbientLight {
+                    fps: 30,
+                    saturation_boost: 0.0,
+                },
+                other => other,
+            };
+            let lighting = Lighting {
+                effect,
+                ..Default::default()
+            };
+
+            assert!(
+                validate_lighting(&lighting, false).is_none(),
+                "{effect} was refused on a machine with no battery"
+            );
+        }
     }
 
     #[test]

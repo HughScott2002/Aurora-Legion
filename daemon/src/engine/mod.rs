@@ -19,6 +19,7 @@ use crate::core::Command;
 use legion_rgb_driver::{BaseEffects, Keyboard, SPEED_RANGE};
 use rand::{rng, rngs::ThreadRng};
 use std::{
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -63,6 +64,10 @@ struct Inner {
     /// Where effects report subsystem state. `None` for the CLI's direct
     /// apply path, which has no core to report to.
     command_tx: Option<Sender<Command>>,
+    /// The battery the Battery effect gauges, found once at startup.
+    /// `None` on a machine without one, and on the CLI's direct apply path,
+    /// which only runs hardware effects.
+    battery_dir: Option<PathBuf>,
 }
 
 impl EffectManager {
@@ -72,6 +77,7 @@ impl EffectManager {
         keyboard: Keyboard,
         stop_signals: StopSignals,
         command_tx: Option<Sender<Command>>,
+        battery_dir: Option<PathBuf>,
     ) -> Self {
         let (tx, rx) = crossbeam_channel::bounded::<Message>(MESSAGE_QUEUE_CAPACITY);
         let device_error = Arc::new(AtomicBool::new(false));
@@ -82,6 +88,7 @@ impl EffectManager {
             stop_signals: stop_signals.clone(),
             device_error: device_error.clone(),
             command_tx,
+            battery_dir,
         };
 
         let inner_handle = thread::spawn(move || {
@@ -285,6 +292,7 @@ impl Inner {
             Effects::Fade => effects::fade::play(self, lighting),
             Effects::Temperature => effects::temperature::play(self),
             Effects::Ripple => effects::ripple::play(self, lighting),
+            Effects::Battery => effects::battery_gauge::play(self, lighting),
         }
     }
 

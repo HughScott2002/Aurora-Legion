@@ -12,11 +12,12 @@ Version 2 moved the lighting configuration out of `Profile` and into
 misread every profile it received, so this is a breaking change and both
 reference clients stop on a mismatch.
 
-Version 3 added the low-battery alert. `DaemonState` gained
-`battery_available`, `battery_alert` and `battery_alert_active`, all
-required, so a version 3 client cannot parse the state a version 2
-daemon sends. That is what makes the change breaking rather than
-additive.
+Version 3 added the battery features. `DaemonState` gained
+`battery_available`, `battery_alert`, `battery_alert_active` and
+`battery_percent`, all required, so a version 3 client cannot parse the
+state a version 2 daemon sends. That is what makes the change breaking
+rather than additive. `Effects` also gained `Battery`, which a version 2
+daemon cannot run.
 
 ## Transport
 
@@ -202,7 +203,8 @@ Subscription semantics:
   "screen_capture": {"type": "Inactive"},
   "battery_available": true,
   "battery_alert": true,
-  "battery_alert_active": false
+  "battery_alert_active": false,
+  "battery_percent": 53
 }
 ```
 
@@ -235,6 +237,11 @@ Subscription semantics:
   and is never saved into one, so a client that draws the keyboard must
   consult this field or it will claim a look the hardware is not
   showing.
+- `battery_percent` is the charge last read, 0 to 100, or `null` on a
+  machine with no battery and before the first read. It is here so a
+  client drawing the keyboard can draw the `Battery` effect's gauge; the
+  daemon reads the charge itself and does not need this field. Sampled
+  every few seconds, so it is recent rather than instantaneous.
 
 At most 128 profiles and 128 custom effects are stored
 (`MAX_SAVED_PROFILES`, `MAX_SAVED_CUSTOM_EFFECTS`).
@@ -364,12 +371,23 @@ objects (externally tagged):
 | `Fade` | none | yes | no | yes |
 | `Temperature` | none | no | no | no |
 | `Ripple` | none | yes | no | yes |
+| `Battery` | none | yes | no | no |
 
 `mode` is `"Change"` or `"Fill"`.
 
 `Static`, `Breath`, `Smooth` and `Wave` run on the keyboard hardware;
 everything else is driven by the daemon. This does not affect the
 protocol, but hardware effects survive a daemon stop.
+
+`Battery` turns the keyboard into a charge gauge. It picks no colours of
+its own: it takes the slot's four zone colours and dims them from the
+right as the battery drains, one zone per 25 percentage points, with the
+zone on the charge line dimmed to the fraction of it that is left. The
+daemon rejects it with `InvalidRequest` on a machine where
+`battery_available` is false, whether it arrives in a `SetLighting`, a
+`SetProfile` or an `AddProfile`, so a profile file written on a laptop
+does not start a gauge on a desktop. Clients should leave it out of an
+effect picker when `battery_available` is false.
 
 ### CustomEffect
 

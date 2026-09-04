@@ -8,7 +8,7 @@ use aurora_protocol::{
 };
 use relm4::{
     adw::{self, prelude::*},
-    gtk::{self, gdk},
+    gtk::{self, gdk, glib},
     ComponentSender,
 };
 use strum::IntoEnumIterator;
@@ -41,6 +41,13 @@ pub struct LightingPage {
 
     pub effect_row: adw::ComboRow,
     pub effect_group: adw::PreferencesGroup,
+    /// The names behind `effect_row`, kept so the list can be corrected
+    /// once the daemon says what this machine can run.
+    pub effect_model: gtk::StringList,
+    /// The selection handler, blocked while the list is rewritten. A
+    /// splice moves the selection, and an unblocked handler would report
+    /// that move as the user picking an effect.
+    pub effect_row_handler: glib::SignalHandlerId,
 
     pub zone_buttons: [gtk::ColorDialogButton; 4],
     pub colors_group: adw::PreferencesGroup,
@@ -59,10 +66,31 @@ pub struct LightingPage {
     pub clean_row: adw::SwitchRow,
 }
 
-/// Effect names in `Effects::iter()` order; the combo row indexes into this.
-pub fn effect_names() -> Vec<&'static str> {
-    let mut names = Vec::new();
+/// The effects the picker offers, in the order it shows them.
+///
+/// An effect that needs hardware this machine does not have is left out
+/// rather than offered and then refused. The daemon rejects it as well;
+/// this is the app not asking.
+///
+/// Every index the combo row deals in comes from this one list: the names,
+/// the index-to-effect lookup, and its reverse. Two lists would eventually
+/// disagree about what position 8 means, and the symptom would be picking
+/// one effect and getting another.
+pub fn selectable_effects(battery_available: bool) -> Vec<Effects> {
+    let mut effects = Vec::new();
     for effect in Effects::iter() {
+        if effect.needs_a_battery() && !battery_available {
+            continue;
+        }
+        effects.push(effect);
+    }
+    effects
+}
+
+/// Names for [`selectable_effects`], in the same order.
+pub fn effect_names(battery_available: bool) -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for effect in selectable_effects(battery_available) {
         let name: &'static str = effect.into();
         names.push(name);
     }
@@ -182,14 +210,17 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     let effect_group = adw::PreferencesGroup::new();
     effect_group.set_visible(false);
 
-    let names = effect_names();
+    // Built without the battery effect, because state has not arrived yet
+    // and nothing here knows whether this machine has a battery.
+    // `set_effects` corrects the list once it does.
+    let names = effect_names(false);
     let effect_model = gtk::StringList::new(&names);
     let effect_row = adw::ComboRow::new();
     effect_row.set_title("Effect");
     effect_row.set_model(Some(&effect_model));
 
     let effect_sender = sender.clone();
-    effect_row.connect_selected_notify(move |row| {
+    let effect_row_handler = effect_row.connect_selected_notify(move |row| {
         let index = row.selected();
         if index != gtk::INVALID_LIST_POSITION {
             effect_sender.input(AppMsg::EffectSelected(index as usize));
@@ -433,6 +464,8 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
         off_button,
         slot_note,
         effect_row,
+        effect_model,
+        effect_row_handler,
         effect_group,
         zone_buttons,
         colors_group,
@@ -465,6 +498,55 @@ impl LightingPage {
         if self.off_button.is_active() != off_should_be_active {
             self.off_button.set_active(off_should_be_active);
         }
+    }
+
+    /// Offer exactly the effects this machine can run, showing `selected`.
+    ///
+    /// The list is built before daemon state arrives, so it starts without
+    /// the effects that need hardware and is corrected here. `selected` is
+    /// a position in `names`, and is `None` when the daemon reports an
+    /// effect the list does not offer, in which case the row is left alone
+    /// rather than moved to something the user did not choose.
+    ///
+    /// The list and the selection are set together, under one signal
+    /// block. A splice moves the selection on its own, so doing these in
+    /// two steps leaves a moment where the row points at an effect nobody
+    /// picked, and the handler would report that moment to the daemon as a
+    /// choice. Blocking costs nothing here: every change this method makes
+    /// came from the daemon, so there is nothing to send back.
+    pub fn set_effects(&self, names: &[&str], selected: Option<usize>) {
+        self.effect_row.block_signal(&self.effect_row_handler);
+
+        // Compare before splicing: rewriting an identical list would drop
+        // the selection and rebuild the popup for nothing.
+        let shown_count = self.effect_model.n_items();
+        if !self.effect_names_match(names) {
+            self.effect_model.splice(0, shown_count, names);
+        }
+
+        if let Some(position) = selected {
+            let position = position as u32;
+            if self.effect_row.selected() != position {
+                self.effect_row.set_selected(position);
+            }
+        }
+
+        self.effect_row.unblock_signal(&self.effect_row_handler);
+    }
+
+    fn effect_names_match(&self, names: &[&str]) -> bool {
+        if self.effect_model.n_items() as usize != names.len() {
+            return false;
+        }
+
+        for (position, name) in names.iter().enumerate() {
+            let shown = self.effect_model.string(position as u32);
+            if shown.as_deref() != Some(*name) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Say why the key cannot be trusted, next to the control that

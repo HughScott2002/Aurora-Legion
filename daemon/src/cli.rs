@@ -20,6 +20,7 @@ use clap::{Args, Subcommand};
 use strum::IntoEnumIterator;
 
 use crate::{
+    battery,
     client::{Client, ClientError},
     engine::{EffectManager, StopSignals},
     keyboard::{self, AcquireOutcome},
@@ -109,12 +110,36 @@ pub struct SetArgs {
     save: Option<PathBuf>,
 }
 
+/// The effects this machine can run.
+///
+/// `Battery` needs a battery and the daemon refuses it without one, so
+/// neither `aurora list` nor an error message offers it here. The probe
+/// happens locally rather than over IPC because `aurora list` has never
+/// needed a running daemon, and needing one to name the effects would be a
+/// worse trade than one directory listing.
+fn available_effects() -> Vec<Effects> {
+    let battery_available = battery::probe().is_some();
+
+    let mut effects = Vec::new();
+    for effect in Effects::iter() {
+        if effect.needs_a_battery() && !battery_available {
+            continue;
+        }
+        effects.push(effect);
+    }
+    effects
+}
+
+/// Parsing stays permissive: the daemon decides what it will run, and a
+/// name it would refuse gets an error from the daemon that says why. Only
+/// the suggestion list is narrowed, so a typo is not answered with a name
+/// that would not have worked either.
 fn parse_effect(arg: &str) -> Result<Effects, String> {
     match Effects::from_str(arg) {
         Ok(effect) => Ok(effect),
         Err(_) => {
             let mut names: Vec<&'static str> = Vec::new();
-            for effect in Effects::iter() {
+            for effect in available_effects() {
                 names.push(effect.into());
             }
             Err(format!(
@@ -156,7 +181,7 @@ pub fn run(command: ClientCommand) -> ExitCode {
     match command {
         ClientCommand::List => {
             println!("List of available effects:");
-            for (index, effect) in Effects::iter().enumerate() {
+            for (index, effect) in available_effects().into_iter().enumerate() {
                 println!("{}. {effect}", index + 1);
             }
             ExitCode::SUCCESS
@@ -398,7 +423,9 @@ fn apply_lighting_directly(lighting: &Lighting) -> ExitCode {
         }
     };
 
-    let engine = EffectManager::new(*keyboard, stop_signals, None);
+    // No battery path: this path runs hardware effects only, and the
+    // Battery effect is not one of them.
+    let engine = EffectManager::new(*keyboard, stop_signals, None, None);
     engine.set_lighting(lighting.clone());
     engine.shutdown();
 

@@ -38,6 +38,10 @@ pub enum Effects {
     Fade,
     Temperature,
     Ripple,
+    /// The keyboard as a charge gauge: the slot's own colors, dimmed zone
+    /// by zone from the right as the battery drains. Offered only on
+    /// machines that have a battery to gauge.
+    Battery,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, EnumIter, EnumString, PartialEq)]
@@ -70,7 +74,15 @@ impl Effects {
                 | Self::Swipe { .. }
                 | Self::Fade
                 | Self::Ripple
+                | Self::Battery
         )
+    }
+
+    /// True for effects that only work where the hardware backs them, so a
+    /// client can leave them out of a picker rather than offer a choice the
+    /// daemon will refuse.
+    pub fn needs_a_battery(self) -> bool {
+        matches!(self, Self::Battery)
     }
 
     pub fn takes_direction(self) -> bool {
