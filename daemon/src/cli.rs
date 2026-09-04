@@ -250,6 +250,13 @@ fn run_status() -> ExitCode {
     print_subsystem("hotkey", &state.hotkey);
     print_subsystem("capture", &state.screen_capture);
 
+    // Same rule as the subsystems above: an armed alert is not news. One
+    // the user switched off is, because it explains a keyboard that stayed
+    // quiet all the way down to empty.
+    if state.battery_available && !state.battery_alert {
+        println!("battery:  low battery alert is off");
+    }
+
     let mut saved_names: Vec<String> = Vec::new();
     for profile in &state.profiles {
         saved_names.push(profile.name.clone());

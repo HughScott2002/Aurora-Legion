@@ -39,6 +39,12 @@ const WINDOW_DEFAULT_HEIGHT: i32 = 720;
 /// pickers and the slot rows from drifting apart.
 const LOCAL_EDIT_GRACE: Duration = Duration::from_millis(400);
 
+/// The red the preview draws while the low-battery alert holds the
+/// keyboard. It matches the colour the daemon writes; the preview has
+/// never drawn brightness for any effect, so it does not draw it here
+/// either.
+const BATTERY_ALERT_PREVIEW_COLOR: [u8; 3] = [255, 0, 0];
+
 pub struct App {
     connected: bool,
     state: Option<DaemonState>,
@@ -134,6 +140,9 @@ pub enum AppMsg {
     StartDaemonRequested,
     DaemonRestartRequested,
     AutostartToggled {
+        enabled: bool,
+    },
+    BatteryAlertToggled {
         enabled: bool,
     },
     AutostartQueried {
@@ -565,6 +574,18 @@ impl SimpleComponent for App {
                     deliver_sender.input(msg);
                 });
             }
+            AppMsg::BatteryAlertToggled { enabled } => {
+                // The daemon owns this setting, so the switch reports the
+                // change and waits for the state broadcast to confirm it,
+                // exactly like every other lighting control.
+                let Some(state) = &self.state else {
+                    return;
+                };
+                if state.battery_alert == enabled {
+                    return; // Echo from update_view.
+                }
+                self.ipc.send(Request::SetBatteryAlert { enabled });
+            }
             AppMsg::AutostartQueried {
                 available,
                 enabled,
@@ -733,6 +754,21 @@ impl SimpleComponent for App {
                 .settings
                 .autostart_row
                 .set_sensitive(switch_sensitive);
+        }
+
+        // The whole group goes on a machine with no battery. Nothing to
+        // explain and nothing to switch.
+        if widgets.settings.battery_group.get_visible() != state.battery_available {
+            widgets
+                .settings
+                .battery_group
+                .set_visible(state.battery_available);
+        }
+        if widgets.settings.battery_alert_row.is_active() != state.battery_alert {
+            widgets
+                .settings
+                .battery_alert_row
+                .set_active(state.battery_alert);
         }
     }
 }
@@ -987,14 +1023,25 @@ impl App {
 
         // Say so where the key would have been used, rather than letting
         // "Fn+Space cycles them" imply something untrue on this machine.
-        let slot_note = match &state.slot_sync {
-            SubsystemState::Unavailable { reason } => Some(format!(
-                "Fn+Space is not available here ({reason}). Use these buttons instead."
-            )),
-            SubsystemState::Degraded { reason } => Some(format!(
-                "Fn+Space may be out of step ({reason}). Pick a slot to resync."
-            )),
-            _ => None,
+        // The battery takes this line first: it explains a keyboard that
+        // is not showing the slot the page is describing, which is more
+        // urgent than anything Fn+Space has to say.
+        let slot_note = if state.battery_alert_active {
+            Some(
+                "Battery is low, so the keyboard is showing red. \
+                 Your lighting returns when you plug in."
+                    .to_string(),
+            )
+        } else {
+            match &state.slot_sync {
+                SubsystemState::Unavailable { reason } => Some(format!(
+                    "Fn+Space is not available here ({reason}). Use these buttons instead."
+                )),
+                SubsystemState::Degraded { reason } => Some(format!(
+                    "Fn+Space may be out of step ({reason}). Pick a slot to resync."
+                )),
+                _ => None,
+            }
         };
         page.set_slot_note(slot_note.as_deref());
 
@@ -1016,7 +1063,16 @@ impl App {
         }
 
         if let Some(slot_index) = lit_slot {
-            page.preview.set_colors(preview_zone_colors(&self.lighting));
+            // The preview draws the keyboard, so it draws the alert when
+            // the alert is what the keyboard is showing. Drawing the
+            // stored colours here would have the app contradict the
+            // hardware in front of the user.
+            let preview_colors = if state.battery_alert_active {
+                [BATTERY_ALERT_PREVIEW_COLOR; 4]
+            } else {
+                preview_zone_colors(&self.lighting)
+            };
+            page.preview.set_colors(preview_colors);
 
             let effect = state.current.slots[slot_index].effect;
             let slot_text = format!("Slot {active_slot} of {SLOT_COUNT} \u{00b7} {effect}");

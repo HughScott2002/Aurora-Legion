@@ -28,7 +28,10 @@ pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// see `docs/protocol.md` for the negotiation rules.
 /// Version 2 moved the lighting configuration from `Profile` into
 /// `Profile::slots`, so a v1 client would misread every profile it receives.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// Version 3 added the low-battery alert: `DaemonState` gained
+/// `battery_available` and `battery_alert`, which a v3 client requires and
+/// a v2 daemon does not send.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Upper bound on saved profiles and custom effects. Without these the
 /// state broadcast grows without limit and eventually exceeds
@@ -208,6 +211,12 @@ pub enum Request {
     DeleteCustomEffect {
         name: String,
     },
+    /// Turn the low-battery alert on or off. Accepted and stored on a
+    /// machine without a battery, where it simply never fires; clients
+    /// hide the setting in that case rather than sending this.
+    SetBatteryAlert {
+        enabled: bool,
+    },
     /// Receive a [`Event::StateChanged`] line on this connection whenever
     /// the daemon state changes.
     Subscribe,
@@ -376,6 +385,22 @@ pub struct DaemonState {
     pub hotkey: SubsystemState,
     /// Screen capture, used only by the Ambient effect.
     pub screen_capture: SubsystemState,
+
+    /// Whether this machine has a battery at all. Decided once at daemon
+    /// startup and fixed for the life of the process. Clients hide the
+    /// low-battery alert setting when this is false: there is nothing the
+    /// user could do about it and nothing to configure.
+    pub battery_available: bool,
+    /// Whether the low-battery alert may take the keyboard. Stored even
+    /// when `battery_available` is false, so moving a config between
+    /// machines keeps the choice.
+    pub battery_alert: bool,
+    /// Whether the alert is taking the keyboard right now. False while
+    /// the backlight is off, however low the battery: there is nothing
+    /// lit to turn red. `current` still reports the lighting the user
+    /// chose, so a client that draws the keyboard must consult this or it
+    /// will claim a look the hardware is not showing.
+    pub battery_alert_active: bool,
 }
 
 #[cfg(test)]
@@ -405,6 +430,9 @@ mod tests {
                 reason: "no display connection".to_string(),
             },
             screen_capture: SubsystemState::Inactive,
+            battery_available: true,
+            battery_alert: true,
+            battery_alert_active: false,
         }
     }
 

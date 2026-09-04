@@ -19,6 +19,8 @@ pub struct SettingsPage {
     pub root: gtk::Widget,
     pub status_row: adw::ActionRow,
     pub autostart_row: adw::SwitchRow,
+    pub battery_group: adw::PreferencesGroup,
+    pub battery_alert_row: adw::SwitchRow,
 }
 
 pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
@@ -65,6 +67,27 @@ pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
     service_group.add(&autostart_row);
 
     content.append(&service_group);
+
+    // --- Battery -----------------------------------------------------------
+    // Built hidden. A machine with no battery has nothing to configure and
+    // nothing the user could do about it, so the group goes rather than
+    // sitting there greyed out asking to be understood.
+    let battery_group = adw::PreferencesGroup::new();
+    battery_group.set_title("Battery");
+    battery_group.set_visible(false);
+
+    let battery_alert_row = adw::SwitchRow::new();
+    battery_alert_row.set_title("Warn When Low");
+    battery_alert_row.set_subtitle("Turn the keyboard red below 15 percent on battery");
+    let battery_sender = sender.clone();
+    battery_alert_row.connect_active_notify(move |row| {
+        battery_sender.input(AppMsg::BatteryAlertToggled {
+            enabled: row.is_active(),
+        });
+    });
+    battery_group.add(&battery_alert_row);
+
+    content.append(&battery_group);
 
     // --- Project ----------------------------------------------------------
     // Aurora is tested on one laptop. The report link is the only way a
@@ -122,6 +145,8 @@ pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
         root: scrolled.upcast(),
         status_row,
         autostart_row,
+        battery_group,
+        battery_alert_row,
     }
 }
 

@@ -1,3 +1,4 @@
+mod battery;
 mod cli;
 mod client;
 mod core;
@@ -107,9 +108,18 @@ fn run_daemon() {
         server::serve(&listener, &accept_command_tx);
     });
 
+    // Whether this machine has a battery is settled once, here. It cannot
+    // change while the daemon runs, so a desktop pays for one directory
+    // listing and never reads again.
+    let battery_dir = battery::probe();
+    match &battery_dir {
+        Some(path) => eprintln!("aurora: watching battery {}", path.display()),
+        None => eprintln!("aurora: no battery found, the low battery alert is off"),
+    }
+
     // The core loop runs on the main thread until a signal or a Shutdown
     // request arrives.
-    core::run(&command_tx, &command_rx, &shutdown_flag);
+    core::run(&command_tx, &command_rx, &shutdown_flag, battery_dir);
 
     let remove_result = std::fs::remove_file(&path);
     if let Err(error) = remove_result {

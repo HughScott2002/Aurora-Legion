@@ -5,6 +5,7 @@
 //! broadcasts them.
 
 use std::{
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -14,6 +15,7 @@ use std::{
 
 use aurora_protocol::{
     custom_effect::CustomEffect,
+    effects::{Brightness, Effects},
     ipc::{
         CustomEffectSummary, DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus,
         ProfileSummary, Request, Response, ResponseEnvelope, SlotSelection, Subsystem,
@@ -24,6 +26,7 @@ use aurora_protocol::{
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::{
+    battery,
     engine::{EffectManager, StopSignals, SOFTWARE_SPEED_RANGE},
     keyboard::{self, AcquireOutcome},
     settings::Settings,
@@ -53,6 +56,22 @@ const SLOT_SETTLE_DELAY: Duration = Duration::from_millis(250);
 /// the controller counter. Reads never move the counter, so sampling
 /// cannot change behavior.
 const SLOT_TRACE_DELAY: Duration = Duration::from_millis(500);
+
+/// Charge at or below which the keyboard turns red, while the battery is
+/// discharging. Above this, or on AC, lighting is whatever the user chose.
+const BATTERY_ALERT_PERCENT: u8 = 15;
+
+/// How often the battery is read. This is a deadline checked on the core
+/// tick, not a wakeup of its own: `TICK_IDLE_MS` is shorter, so the read
+/// always lands within one idle tick of falling due and costs nothing on
+/// top of a loop that was already turning. A four-byte sysfs read does not
+/// justify a udev netlink listener of the kind `slot_watch` needs.
+const BATTERY_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// What the keyboard shows while the battery is low: red at the hardware's
+/// low brightness, so the alert looks the same whatever brightness the
+/// user's own lighting was using.
+const BATTERY_ALERT_COLOR: [u8; 3] = [255, 0, 0];
 
 /// Commands the core accepts. Keep this the only way to mutate daemon state.
 pub enum Command {
@@ -124,6 +143,18 @@ pub struct Core {
     hotkey: SubsystemState,
     screen_capture: SubsystemState,
 
+    /// The battery directory found at startup, or `None` on a machine
+    /// without one. Decided once: batteries do not appear at runtime, and
+    /// a desktop must never pay for a read.
+    battery_dir: Option<PathBuf>,
+    /// Whether the battery is low enough for the alert to want the
+    /// keyboard. Whether it actually gets it also depends on the backlight
+    /// being on; see [`Core::battery_alert_is_showing`]. Never persisted:
+    /// this is a fact about the battery, not a setting.
+    battery_alert_active: bool,
+    /// When the battery is next due to be read.
+    battery_read_at: Instant,
+
     shutdown_requested: bool,
 }
 
@@ -131,6 +162,7 @@ pub fn run(
     command_tx: &Sender<Command>,
     command_rx: &Receiver<Command>,
     shutdown_flag: &Arc<AtomicBool>,
+    battery_dir: Option<PathBuf>,
 ) {
     let settings = Settings::load_or_migrate();
     let current_profile = settings.current_profile.clone();
@@ -157,6 +189,11 @@ pub fn run(
         slot_sync: SubsystemState::Unknown,
         hotkey: SubsystemState::Unknown,
         screen_capture: SubsystemState::Inactive,
+        battery_dir,
+        battery_alert_active: false,
+        // Read on the first tick rather than after one interval, so a
+        // daemon started on a nearly flat battery warns immediately.
+        battery_read_at: Instant::now(),
         shutdown_requested: false,
     };
 
@@ -176,6 +213,7 @@ pub fn run(
 
         core.apply_slot_if_due();
         core.trace_slot_counter_if_due();
+        core.read_battery_if_due();
         core.save_settings_if_due();
     }
 
@@ -368,6 +406,7 @@ impl Core {
             Request::CycleProfile => self.cycle_profile(),
             Request::AddCustomEffect { effect } => self.add_custom_effect(effect),
             Request::DeleteCustomEffect { name } => self.delete_custom_effect(&name),
+            Request::SetBatteryAlert { enabled } => self.set_battery_alert(enabled),
             Request::Shutdown => {
                 self.shutdown_requested = true;
                 Response::Ok
@@ -385,12 +424,7 @@ impl Core {
         self.custom_effect_playing = None;
         self.slot_apply_at = None;
 
-        let lighting = match self.active_slot.index() {
-            Some(slot_index) => self.current_profile.slots[slot_index].clone(),
-            // Off holds no lighting: write darkness rather than nothing, so
-            // the keyboard matches what Aurora reports.
-            None => Lighting::default(),
-        };
+        let lighting = self.lighting_to_show();
 
         eprintln!("core: applying slot {} ({reason})", self.active_slot);
         if let Some(engine) = &self.engine {
@@ -399,6 +433,95 @@ impl Core {
 
         self.schedule_slot_trace();
         self.broadcast_state();
+    }
+
+    /// What the keyboard should be showing: the low-battery alert while it
+    /// holds, otherwise the live slot's own lighting.
+    ///
+    /// The alert lives here and nowhere else. `current_profile` is never
+    /// touched by it, and the settings file is written from
+    /// `current_profile`, so alert lighting cannot reach disk by
+    /// construction rather than by anyone remembering to avoid it.
+    fn lighting_to_show(&self) -> Lighting {
+        let slot_lighting = match self.active_slot.index() {
+            Some(slot_index) => self.current_profile.slots[slot_index].clone(),
+            // Off holds no lighting: write darkness rather than nothing, so
+            // the keyboard matches what Aurora reports.
+            None => Lighting::default(),
+        };
+
+        if !self.battery_alert_is_showing() {
+            return slot_lighting;
+        }
+
+        battery_alert_lighting()
+    }
+
+    /// Whether the alert is taking the keyboard right now.
+    ///
+    /// A low battery is not enough on its own. With the backlight off
+    /// there is nothing lit to turn red, so the alert is not showing, and
+    /// reporting it as if it were would have clients draw a red keyboard
+    /// next to a dark one. Off stays off: that was a choice, and an unlit
+    /// keyboard cannot warn anyone anyway.
+    fn battery_alert_is_showing(&self) -> bool {
+        self.battery_alert_active && self.active_slot.index().is_some()
+    }
+
+    /// Read the battery and turn the alert on or off. Runs on the core
+    /// thread with every other state change, so the alert needs no channel
+    /// and no thread of its own.
+    fn read_battery_if_due(&mut self) {
+        let Some(battery_dir) = self.battery_dir.clone() else {
+            return;
+        };
+        if Instant::now() < self.battery_read_at {
+            return;
+        }
+        self.battery_read_at = Instant::now() + BATTERY_POLL_INTERVAL;
+
+        // A read that fails leaves the alert where it is and tries again
+        // next time: a battery that briefly cannot be read is not news.
+        let Some(reading) = battery::read(&battery_dir) else {
+            return;
+        };
+
+        let alert_holds = battery_alert_holds(self.settings.battery_alert, reading);
+        if alert_holds == self.battery_alert_active {
+            return;
+        }
+
+        self.battery_alert_active = alert_holds;
+        let reason = if alert_holds {
+            "battery low"
+        } else {
+            "battery recovered"
+        };
+        eprintln!("core: {reason} at {}%", reading.percent);
+        self.apply_active_slot(reason);
+    }
+
+    /// Turn the alert on or off. Off must give the keyboard back now rather
+    /// than at the next read, or the switch looks broken.
+    fn set_battery_alert(&mut self, enabled: bool) -> Response {
+        if self.settings.battery_alert == enabled {
+            return Response::Ok;
+        }
+
+        self.settings.battery_alert = enabled;
+        self.mark_changed();
+
+        if !enabled && self.battery_alert_active {
+            self.battery_alert_active = false;
+            self.apply_active_slot("battery alert turned off");
+            return Response::Ok;
+        }
+
+        // Turning it on must not wait out the poll interval either; the
+        // next tick reads and applies.
+        self.battery_read_at = Instant::now();
+        self.broadcast_state();
+        Response::Ok
     }
 
     /// One Fn+Space press. The slot advances immediately so clients see it,
@@ -773,6 +896,9 @@ impl Core {
             slot_sync: self.slot_sync.clone(),
             hotkey: self.hotkey.clone(),
             screen_capture: self.screen_capture.clone(),
+            battery_available: self.battery_dir.is_some(),
+            battery_alert: self.settings.battery_alert,
+            battery_alert_active: self.battery_alert_is_showing(),
         }
     }
 
@@ -906,6 +1032,26 @@ fn anchor_slot(
     }
 }
 
+/// Whether the low-battery alert should be holding the keyboard.
+///
+/// Split out from the core so the rule is testable on its own, and stated
+/// once so the switch, the poll and the tests cannot drift apart. Being on
+/// AC clears the alert outright, so there is nothing for a hysteresis band
+/// to protect against and none is used.
+fn battery_alert_holds(enabled: bool, reading: battery::Reading) -> bool {
+    enabled && reading.discharging && reading.percent <= BATTERY_ALERT_PERCENT
+}
+
+/// Every zone red at the hardware's low brightness, held steady. Built
+/// fresh each time rather than stored: it is a constant dressed as a
+/// value, and nothing should be able to edit it.
+fn battery_alert_lighting() -> Lighting {
+    let mut lighting = Lighting::solid(BATTERY_ALERT_COLOR);
+    lighting.effect = Effects::Static;
+    lighting.brightness = Brightness::Low;
+    lighting
+}
+
 fn validate_name(name: &str, kind: &str) -> Option<Response> {
     if name.is_empty() {
         return Some(error_response(
@@ -1002,7 +1148,45 @@ mod tests {
     use aurora_protocol::ipc::SlotSelection;
     use legion_rgb_driver::error::{Error, RangeError, RangeErrorKind};
 
-    use super::anchor_slot;
+    use super::{anchor_slot, battery, battery_alert_holds, BATTERY_ALERT_PERCENT};
+
+    fn reading(percent: u8, discharging: bool) -> battery::Reading {
+        battery::Reading {
+            percent,
+            discharging,
+        }
+    }
+
+    #[test]
+    fn the_alert_holds_at_and_below_the_threshold_while_discharging() {
+        assert!(battery_alert_holds(
+            true,
+            reading(BATTERY_ALERT_PERCENT, true)
+        ));
+        assert!(battery_alert_holds(true, reading(1, true)));
+        assert!(battery_alert_holds(true, reading(0, true)));
+    }
+
+    #[test]
+    fn the_alert_lets_go_one_percent_above_the_threshold() {
+        assert!(!battery_alert_holds(
+            true,
+            reading(BATTERY_ALERT_PERCENT + 1, true)
+        ));
+    }
+
+    /// Conservation mode reports `Not charging` on AC, which reaches here
+    /// as `discharging: false`. Plugged in is plugged in, however flat.
+    #[test]
+    fn being_on_ac_clears_the_alert_at_any_charge() {
+        assert!(!battery_alert_holds(true, reading(1, false)));
+        assert!(!battery_alert_holds(true, reading(0, false)));
+    }
+
+    #[test]
+    fn the_switch_turns_the_alert_off_outright() {
+        assert!(!battery_alert_holds(false, reading(1, true)));
+    }
 
     #[test]
     fn off_on_the_counter_wins_over_any_stored_slot() {

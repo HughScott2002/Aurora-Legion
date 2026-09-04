@@ -5,12 +5,18 @@ client. It is enough to implement a client without reading Rust. The
 types live in [`protocol/src/ipc.rs`](../protocol/src/ipc.rs). If code
 and this page disagree, this page is wrong.
 
-Protocol version: **2** (`PROTOCOL_VERSION` in the protocol crate).
+Protocol version: **3** (`PROTOCOL_VERSION` in the protocol crate).
 
 Version 2 moved the lighting configuration out of `Profile` and into
 `Profile.slots`, one entry per Fn+Space slot. A version 1 client would
 misread every profile it received, so this is a breaking change and both
 reference clients stop on a mismatch.
+
+Version 3 added the low-battery alert. `DaemonState` gained
+`battery_available`, `battery_alert` and `battery_alert_active`, all
+required, so a version 3 client cannot parse the state a version 2
+daemon sends. That is what makes the change breaking rather than
+additive.
 
 ## Transport
 
@@ -80,8 +86,8 @@ Two version numbers exist:
 Handshake: send `Hello` first on every new connection.
 
 ```json
-{"id": 1, "req": {"type": "Hello", "protocol_version": 2}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 2, "daemon_version": "0.24.1"}}
+{"id": 1, "req": {"type": "Hello", "protocol_version": 3}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 3, "daemon_version": "0.24.1"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
@@ -116,6 +122,7 @@ Requests are objects tagged by `"type"`; parameters are sibling fields.
 | `CycleProfile` | none | `Ok` | Advance to the next saved profile, wrapping around. |
 | `AddCustomEffect` | `effect` | `Ok` | Save a named custom effect; overwrites one with the same name. Name required and non-empty. |
 | `DeleteCustomEffect` | `name` | `Ok` | Delete the saved custom effect called `name`. |
+| `SetBatteryAlert` | `enabled` | `Ok` | Turn the low-battery alert on or off. Accepted and stored on a machine with no battery, where it never fires. |
 | `Subscribe` | none | `Ok` | Push a `StateChanged` event on this connection whenever daemon state changes. |
 | `Shutdown` | none | `Ok` | Ask the daemon to exit cleanly. The `Ok` is queued before exit, but clients should tolerate the connection closing without it. |
 
@@ -192,7 +199,10 @@ Subscription semantics:
   "settings_error": null,
   "slot_sync": {"type": "Active"},
   "hotkey": {"type": "Unavailable", "reason": "no display connection"},
-  "screen_capture": {"type": "Inactive"}
+  "screen_capture": {"type": "Inactive"},
+  "battery_available": true,
+  "battery_alert": true,
+  "battery_alert_active": false
 }
 ```
 
@@ -211,6 +221,20 @@ Subscription semantics:
   reported rather than fatal.
 - `slot_sync`, `hotkey` and `screen_capture` are `SubsystemState`
   values. See below.
+- `battery_available` says whether this machine has a battery at all. It
+  is decided once at daemon startup and fixed for the life of the
+  process. Clients hide the low-battery alert setting when it is false:
+  there is nothing to configure and nothing the user could act on.
+- `battery_alert` says whether the low-battery alert may take the
+  keyboard.
+- `battery_alert_active` says whether the alert is taking the keyboard
+  right now. It is false while `active_slot` is `"Off"`, however low the
+  battery, because there is nothing lit to turn red. While it is true the
+  keyboard shows red instead of the active slot's lighting, and `current`
+  still reports the lighting the user chose. The alert is not a profile
+  and is never saved into one, so a client that draws the keyboard must
+  consult this field or it will claim a look the hardware is not
+  showing.
 
 At most 128 profiles and 128 custom effects are stored
 (`MAX_SAVED_PROFILES`, `MAX_SAVED_CUSTOM_EFFECTS`).
@@ -389,8 +413,8 @@ protocol, but hardware effects survive a daemon stop.
 ## Example session
 
 ```text
-C: {"id":1,"req":{"type":"Hello","protocol_version":2}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":2,"daemon_version":"0.24.1"}}
+C: {"id":1,"req":{"type":"Hello","protocol_version":3}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":3,"daemon_version":"0.24.1"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}

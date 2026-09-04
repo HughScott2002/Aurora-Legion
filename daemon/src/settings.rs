@@ -47,11 +47,23 @@ pub struct Settings {
     /// Which Fn+Space position was live when the daemon last ran.
     pub active_slot: SlotSelection,
 
+    /// Whether the low-battery alert may take the keyboard. Defaulted
+    /// rather than required, so a settings file written before the alert
+    /// existed still loads.
+    #[serde(default = "default_battery_alert")]
+    pub battery_alert: bool,
+
     /// Set when the file on disk could not be parsed. While this holds a
     /// reason, [`Settings::save`] refuses to write, so an unreadable file
     /// is never overwritten by defaults.
     #[serde(skip)]
     save_blocked: Option<String>,
+}
+
+/// The alert starts on. It costs nothing until the battery is actually
+/// low, and a warning nobody switched on is the one that saves the work.
+fn default_battery_alert() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -61,6 +73,7 @@ impl Default for Settings {
             effects: Vec::new(),
             current_profile: Profile::default(),
             active_slot: SlotSelection::First,
+            battery_alert: default_battery_alert(),
             save_blocked: None,
         }
     }
@@ -384,6 +397,7 @@ impl LegacySettings {
             effects: self.effects,
             current_profile,
             active_slot,
+            battery_alert: default_battery_alert(),
             save_blocked: None,
         }
     }
@@ -610,6 +624,7 @@ mod tests {
             effects: Vec::new(),
             current_profile: Profile::default(),
             active_slot: SlotSelection::Third,
+            battery_alert: true,
             save_blocked: None,
         };
 
@@ -622,6 +637,27 @@ mod tests {
             parsed.save_blocked.is_none(),
             "the block flag must not travel through the file"
         );
+    }
+
+    /// Settings files written before the low-battery alert existed carry no
+    /// `battery_alert` field. They must still load, with the alert on.
+    #[test]
+    fn a_settings_file_without_the_battery_field_still_loads() {
+        // Build the old shape by dropping the field from the current one,
+        // so this stays honest if the rest of the file changes.
+        let current = Settings::default();
+        let json = serde_json::to_string(&current).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let removed = value
+            .as_object_mut()
+            .expect("settings serialize as an object")
+            .remove("battery_alert");
+        assert!(removed.is_some(), "the field was there to remove");
+
+        let parsed: Result<Settings, serde_json::Error> = serde_json::from_value(value);
+        let parsed = parsed.expect("a file without the field parses");
+
+        assert!(parsed.battery_alert, "the alert defaults on");
     }
 
     /// A v2 file must not be re-migrated: v1 parsing is only reached when
