@@ -61,6 +61,20 @@ its gaps in its own header. Full context: #28.
       change, unbounded in principle. Found while counting threads; no
       issue yet.
 
+## Battery gauge
+
+The maths is tested, the wiring is not. What was reviewed by reading and
+never executed: #35.
+
+- [ ] Run the app and watch the effect picker rebuild its list when the
+      daemon reports a battery. The splice blocks the selection handler;
+      if that block is wrong the keyboard jumps to position 0.
+      Issue: #35
+- [ ] No effect in the repo has a test, because they all need an engine
+      `Inner` with a real keyboard. Solve once for all of them.
+      Issue: #35
+- [ ] Watch the gauge dim against a draining battery. Issue: #35
+
 ## Diagnostics
 
 - [ ] `aurora doctor`: enumerate the device, report whether the udev
