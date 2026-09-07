@@ -31,7 +31,9 @@ pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 /// Version 3 added the battery features: `DaemonState` gained
 /// `battery_available`, `battery_alert`, `battery_alert_active` and
 /// `battery_percent`, which a v3 client requires and a v2 daemon does not
-/// send, and `Effects` gained `Battery`, which a v2 daemon cannot run.
+/// send, and `Effects` gained `Battery`, which a v2 daemon cannot run. It
+/// also added `KeyboardStatus::Lost`, which a v2 client would fail to
+/// parse.
 pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Upper bound on saved profiles and custom effects. Without these the
@@ -300,6 +302,12 @@ pub enum KeyboardStatus {
     Searching,
     /// A keyboard exists but the daemon may not open it (udev rule missing).
     PermissionDenied { message: String },
+    /// The keyboard was working this session, stopped answering, and has
+    /// stayed off the bus long enough to rule out a suspend blip. The
+    /// daemon keeps retrying, but nothing it can do will open a controller
+    /// the kernel can no longer enumerate, so a client should say that
+    /// rather than promise a reconnect.
+    Lost,
     /// Any other acquisition or runtime device failure.
     Error { message: String },
 }

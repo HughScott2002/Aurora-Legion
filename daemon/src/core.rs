@@ -116,6 +116,11 @@ pub struct Core {
     active_slot: SlotSelection,
     custom_effect_playing: Option<String>,
     keyboard_status: KeyboardStatus,
+    /// When the keyboard stopped answering, if it has this session. Cleared
+    /// on acquisition. This is what separates a controller that went away
+    /// from one that was never here: both leave the bus empty, but only the
+    /// first has a user watching for it to come back.
+    keyboard_lost_at: Option<Instant>,
 
     engine: Option<EffectManager>,
     stop_signals: StopSignals,
@@ -180,6 +185,7 @@ pub fn run(
         active_slot,
         custom_effect_playing: None,
         keyboard_status: KeyboardStatus::Searching,
+        keyboard_lost_at: None,
         engine: None,
         stop_signals: StopSignals::new(),
         slot_apply_at: None,
@@ -249,6 +255,7 @@ impl Core {
         self.slot_reader = None;
         self.slot_trace_at = None;
         self.keyboard_status = KeyboardStatus::Searching;
+        self.keyboard_lost_at = Some(Instant::now());
         self.acquire_attempt_count = 0;
         self.next_acquire_at = Instant::now();
         self.broadcast_state();
@@ -284,9 +291,13 @@ impl Core {
                 self.engine = Some(engine);
                 self.slot_reader = Some(slot_reader);
                 self.keyboard_status = KeyboardStatus::Connected;
+                self.keyboard_lost_at = None;
                 self.apply_active_slot("keyboard acquired");
             }
             AcquireOutcome::Failed(status) => {
+                let lost_for = self.keyboard_lost_at.map(|lost_at| lost_at.elapsed());
+                let status = keyboard::status_after_loss(status, lost_for);
+
                 // Only broadcast on transitions so a missing keyboard does
                 // not spam subscribers every ten seconds.
                 if status != self.keyboard_status {

@@ -681,6 +681,13 @@ impl SimpleComponent for App {
                 widgets.permission_banner.set_button_label(None);
                 widgets.permission_banner.set_revealed(true);
             }
+            KeyboardStatus::Lost => {
+                widgets.permission_banner.set_title(
+                    "Keyboard stopped responding and left the USB bus. Restarting Aurora will not bring it back; a reboot usually does",
+                );
+                widgets.permission_banner.set_button_label(None);
+                widgets.permission_banner.set_revealed(true);
+            }
             KeyboardStatus::Error { message } => {
                 widgets.permission_banner.set_title(&format!(
                     "Keyboard error: {message}. Retrying automatically…"

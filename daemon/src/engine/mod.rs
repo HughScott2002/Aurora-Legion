@@ -334,7 +334,8 @@ impl Inner {
     // the effect now".
 
     fn record_device_error(&self, operation: &str, error: &legion_rgb_driver::error::Error) {
-        eprintln!("engine: keyboard {operation} failed: {error}");
+        let reason = crate::keyboard::readable_error(error.to_string());
+        eprintln!("engine: keyboard {operation} failed: {reason}");
         self.device_error.store(true, Ordering::SeqCst);
         self.stop_signals.store_true();
     }

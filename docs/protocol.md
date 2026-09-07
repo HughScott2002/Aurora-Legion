@@ -17,7 +17,8 @@ Version 3 added the battery features. `DaemonState` gained
 `battery_percent`, all required, so a version 3 client cannot parse the
 state a version 2 daemon sends. That is what makes the change breaking
 rather than additive. `Effects` also gained `Battery`, which a version 2
-daemon cannot run.
+daemon cannot run, and `KeyboardStatus` gained `Lost`, which a version 2
+client would fail to parse.
 
 ## Transport
 
@@ -290,7 +291,15 @@ Tagged by `"type"`:
 | `Connected` | none | Keyboard acquired; effects are applied. |
 | `Searching` | none | No keyboard found yet; the daemon retries with backoff. |
 | `PermissionDenied` | `message` | Keyboard present but not openable (udev rule missing). |
+| `Lost` | none | Worked this session, then stopped answering and stayed off the bus. |
 | `Error` | `message` | Any other device failure. |
+
+`Searching` and `Lost` both mean the bus holds no supported keyboard. They
+differ in what a client should say: `Searching` is a keyboard that has not
+turned up yet and may at any moment, `Lost` is one the kernel can no longer
+enumerate, where restarting the daemon changes nothing and a reboot is the
+usual fix. The daemon waits out a short grace period before reporting
+`Lost`, so a suspend and resume reads as `Searching` throughout.
 
 ### Profile
 

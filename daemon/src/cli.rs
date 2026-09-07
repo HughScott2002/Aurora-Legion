@@ -241,6 +241,10 @@ fn run_status() -> ExitCode {
             println!("keyboard: permission denied ({message})");
             println!("          install the udev rule: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/how-to/install-linux.md#grant-keyboard-access");
         }
+        aurora_protocol::ipc::KeyboardStatus::Lost => {
+            println!("keyboard: stopped responding and left the USB bus");
+            println!("          restarting the daemon will not open it again; reboot to recover");
+        }
         aurora_protocol::ipc::KeyboardStatus::Error { message } => {
             println!("keyboard: error ({message})")
         }

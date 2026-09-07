@@ -22,7 +22,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Protocol version 3: `DaemonState` gained `battery_available`,
   `battery_alert`, `battery_alert_active` and `battery_percent`,
-  `Effects` gained `Battery`, and `SetBatteryAlert` was added.
+  `Effects` gained `Battery`, `KeyboardStatus` gained `Lost`, and
+  `SetBatteryAlert` was added.
 - Controls a position cannot use are removed, not greyed out. Backlight
   off hides Effect, Zone Colors, Options, Ambient and Swipe.
 - Backlight off replaces the keyboard preview with a faded mark.
@@ -33,6 +34,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Permission-denied hint linked a dead anchor.
+- A keyboard that stops answering is reported as lost instead of as a
+  reconnect that never arrives. Restarting the daemon cannot reopen a
+  controller that left the USB bus, and Aurora now says so (#37).
+- Device errors no longer show hidapi's `hid_error is not implemented
+  yet` placeholder where the reason belongs (#37).
 
 ## [0.24.1] - 2026-07-27
 
