@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/HughScott2002/Aurora-Legion/discussions
+    about: Ask how something works, or float an idea before it becomes an issue.
+  - name: Installation and troubleshooting guides
+    url: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/how-to/troubleshoot.md
+    about: Permission errors, a keyboard that is not found, and the daemon not starting.
