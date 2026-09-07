@@ -11,6 +11,7 @@
 | `aurora set` | Build and apply lighting from command-line options. |
 | `aurora list` | List the built-in effects this machine can run. |
 | `aurora status` | Show daemon, keyboard, profile and Fn+Space slot state. |
+| `aurora doctor` | Check this machine for anything stopping Aurora working. |
 | `aurora cycle-profile` | Apply the next profile saved through the GUI. |
 | `aurora slot` | Show or change the active Fn+Space slot. |
 | `aurora load-profile` | Load and apply a profile JSON file. |
@@ -90,6 +91,38 @@ Settings, Keyboard, View and Customize Shortcuts, Custom Shortcuts, and
 add `aurora cycle-profile` with whatever key you want. The binding works
 on Wayland and X11 alike, and survives Aurora being restarted or
 upgraded.
+
+## `doctor`
+
+```text
+aurora doctor [--json]
+```
+
+Checks this machine for anything stopping Aurora working: the version and
+distro, what sits on the USB bus, whether the controller opens, the udev
+rule, the daemon, the systemd unit, and the battery. Each check prints one
+line marked `ok`, `warn`, `fail` or `?`, and a failing check says what to
+do about it.
+
+| Option | Effect |
+| --- | --- |
+| `--json` | Print the report as JSON instead of text. |
+
+The exit status is 0 when nothing failed and 1 when something did, so a
+script can branch on it. Warnings do not fail the command: a machine with
+no battery is not broken, it just cannot use the battery features.
+
+Colour is added only for an interactive terminal. It is dropped when the
+output is piped, when `NO_COLOR` is set to anything non-empty, and when
+`TERM` is `dumb`.
+
+The JSON is an object with `aurora`, `problems` and `checks`. Each check
+has `name`, `health` (`ok`, `warn`, `fail` or `unknown`), `summary`,
+`detail` and `fix`.
+
+The text output is what to paste into a bug report. It names the distro,
+kernel, session, what is on the USB bus, whether the controller opens,
+and what the daemon says about the keyboard.
 
 ## Effects
 

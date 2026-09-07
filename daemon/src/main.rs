@@ -2,6 +2,7 @@ mod battery;
 mod cli;
 mod client;
 mod core;
+mod doctor;
 mod engine;
 mod hotkey;
 mod keyboard;

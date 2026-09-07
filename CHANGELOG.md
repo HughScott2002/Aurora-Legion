@@ -12,6 +12,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Battery effect: the keyboard as a charge gauge in your own zone
   colours, dimming from the right as the battery drains.
 - `aurora status` and Settings flag a daemon older than the build.
+- `aurora doctor` checks this machine and says what is stopping Aurora
+  working, with `--json` for scripts (#3).
 
 ### Changed
 

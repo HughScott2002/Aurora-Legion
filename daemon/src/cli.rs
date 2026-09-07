@@ -37,6 +37,9 @@ pub enum ClientCommand {
     /// Show daemon and keyboard status
     Status,
 
+    /// Check this machine for anything stopping Aurora working
+    Doctor(DoctorArgs),
+
     /// Switch to the next saved profile
     CycleProfile,
 
@@ -60,6 +63,13 @@ pub enum ClientCommand {
 
     /// Ask a running daemon to exit
     Shutdown,
+}
+
+#[derive(Args)]
+pub struct DoctorArgs {
+    /// Print the report as JSON instead of text
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -187,6 +197,7 @@ pub fn run(command: ClientCommand) -> ExitCode {
             ExitCode::SUCCESS
         }
         ClientCommand::Status => run_status(),
+        ClientCommand::Doctor(args) => crate::doctor::run(args.json),
         ClientCommand::Set(args) => run_set(&args),
         ClientCommand::CycleProfile => run_simple_request(Request::CycleProfile, "profile cycled"),
         ClientCommand::Slot(args) => run_slot(&args),

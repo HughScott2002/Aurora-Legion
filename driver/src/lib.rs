@@ -11,6 +11,10 @@ use std::{
 
 pub mod error;
 
+/// Lenovo's USB vendor ID. Every controller the driver knows is one of
+/// theirs, so a scan of the bus starts here and narrows by product.
+pub const VENDOR_ID: u16 = 0x048d;
+
 const KNOWN_DEVICE_INFOS: [(u16, u16, u16, u16); 11] = [
     (0x048d, 0xc995, 0xff89, 0x00cc), // 2024 Pro
     (0x048d, 0xc994, 0xff89, 0x00cc), // 2024
@@ -485,22 +489,97 @@ pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
     Ok(keyboard)
 }
 
-pub fn find_possible_keyboards() -> Result<Vec<String>> {
+/// True where this product ID is a controller the driver knows how to
+/// program. Linux matches on vendor and product alone; the usage page and
+/// usage in [`KNOWN_DEVICE_INFOS`] are a Windows-only distinction, so this
+/// answers the Linux question.
+pub fn is_supported_product_id(product_id: u16) -> bool {
+    for known in KNOWN_DEVICE_INFOS {
+        if known.1 == product_id {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// One device sitting on the bus under [`VENDOR_ID`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VendorDevice {
+    pub product_id: u16,
+    pub supported: bool,
+}
+
+/// Every device this machine exposes under Lenovo's vendor ID, whether the
+/// driver can program it or not.
+///
+/// The unsupported ones are the point. A Legion puts its plain HID keyboard
+/// interface behind the same vendor ID as its lighting controller, so
+/// "something of Lenovo's is here but it is not the controller" and "nothing
+/// is here at all" are different answers, and only a scan tells them apart.
+pub fn scan_vendor_devices() -> Result<Vec<VendorDevice>> {
     let api: HidApi = HidApi::new()?;
 
-    let mut list = api
-        .device_list()
-        .filter(|d| d.vendor_id() == 0x048d)
-        .map(|d| format!("{:#06x}:{:#06x}", d.vendor_id(), d.product_id()))
-        .collect::<Vec<String>>();
+    let mut devices: Vec<VendorDevice> = Vec::new();
+    for info in api.device_list() {
+        if info.vendor_id() != VENDOR_ID {
+            continue;
+        }
 
-    list.dedup();
-    Ok(list)
+        // One device shows up once per interface, and the interfaces are
+        // not what a reader of this list cares about.
+        let mut already_listed = false;
+        for listed in &devices {
+            if listed.product_id == info.product_id() {
+                already_listed = true;
+                break;
+            }
+        }
+        if already_listed {
+            continue;
+        }
+
+        devices.push(VendorDevice {
+            product_id: info.product_id(),
+            supported: is_supported_product_id(info.product_id()),
+        });
+    }
+
+    Ok(devices)
+}
+
+/// Opens the controller, then closes it, reporting only whether it opened.
+/// Writes nothing.
+///
+/// A machine with no controller and a machine whose controller Aurora may
+/// not open look identical from the outside: the keyboard stays dark. They
+/// need opposite fixes, so a diagnostic has to try the open and say which
+/// one it hit.
+pub fn can_open_keyboard() -> Result<()> {
+    let api: HidApi = HidApi::new()?;
+    let info = find_known_device(&api)?;
+    let _device = info.open_device(&api)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_known_product_id_is_recognised() {
+        for known in KNOWN_DEVICE_INFOS {
+            assert!(is_supported_product_id(known.1), "{:#06x}", known.1);
+        }
+    }
+
+    #[test]
+    fn the_plain_keyboard_interface_is_not_a_controller() {
+        // 048d:c103 is the HID keyboard a Legion exposes beside its
+        // lighting controller. Same vendor, not the device Aurora drives.
+        assert!(!is_supported_product_id(0xc103));
+    }
 
     #[test]
     fn complete_profile_replaces_every_payload_field() {
