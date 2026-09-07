@@ -8,15 +8,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Low battery alert: the keyboard turns red below 15 percent on
-  battery, and returns to your lighting when you plug in. Settings has a
-  switch for it, hidden on machines without a battery.
-- Battery effect: the keyboard as a charge gauge, dimming from the right
-  as the battery drains. It uses your own zone colours and only decides
-  how much of each survives. Offered where there is a battery, and
-  wherever the daemon already reports it running.
-- `aurora status` and Settings flag a daemon older than the installed
-  build.
+- Low battery alert: the keyboard turns red below 15 percent on battery.
+- Battery effect: the keyboard as a charge gauge in your own zone
+  colours, dimming from the right as the battery drains.
+- `aurora status` and Settings flag a daemon older than the build.
 
 ### Changed
 
@@ -24,21 +19,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `battery_alert`, `battery_alert_active` and `battery_percent`,
   `Effects` gained `Battery`, `KeyboardStatus` gained `Lost`, and
   `SetBatteryAlert` was added.
-- Controls a position cannot use are removed, not greyed out. Backlight
-  off hides Effect, Zone Colors, Options, Ambient and Swipe.
+- Controls a position cannot use are removed, not greyed out.
 - Backlight off replaces the keyboard preview with a faded mark.
 - Off leads the slot picker.
-- The app icon is the real Aurora mark, and declares an intrinsic size
-  so it renders in tools that rasterise without a viewport (#2).
+- The app icon is the real Aurora mark, with an intrinsic size (#2).
 
 ### Fixed
 
 - Permission-denied hint linked a dead anchor.
-- A keyboard that stops answering is reported as lost instead of as a
-  reconnect that never arrives. Restarting the daemon cannot reopen a
-  controller that left the USB bus, and Aurora now says so (#37).
+- A keyboard that stops answering reads as lost, not reconnecting (#37).
 - Device errors no longer show hidapi's `hid_error is not implemented
-  yet` placeholder where the reason belongs (#37).
+  yet` placeholder (#37).
 
 ## [0.24.1] - 2026-07-27
 
