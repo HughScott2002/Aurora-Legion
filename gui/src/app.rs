@@ -340,7 +340,11 @@ impl SimpleComponent for App {
             AppMsg::Ipc(update) => self.handle_ipc_update(update, &sender),
 
             AppMsg::EffectSelected(index) => {
-                let Some(selected) = effect_by_index(self.battery_available(), index) else {
+                // Decoded against the list the user was looking at, which
+                // is why the currently active effect is passed in.
+                let Some(selected) =
+                    effect_by_index(self.battery_available(), self.lighting.effect, index)
+                else {
                     return;
                 };
                 // Reselecting the same effect is a no-op even when its
@@ -912,7 +916,7 @@ impl App {
         // Effect combo. The list and the selection go together: the
         // selection is a position in the list, so they are never allowed to
         // be out of step, not even for one signal.
-        let effect_names = lighting::effect_names(state.battery_available);
+        let effect_names = lighting::effect_names(state.battery_available, self.lighting.effect);
         let selected_effect = effect_index(state.battery_available, self.lighting.effect);
         page.set_effects(&effect_names, selected_effect);
 
@@ -1147,8 +1151,11 @@ fn active_lighting(state: &DaemonState) -> Lighting {
 
 /// The effect at a combo row position, with usable defaults for the
 /// field-carrying variants (the picker's list yields zeroed fields).
-fn effect_by_index(battery_available: bool, index: usize) -> Option<Effects> {
-    let effect = lighting::selectable_effects(battery_available)
+///
+/// `active` is what the daemon reports, because the list the user is
+/// looking at includes it even when this machine cannot start it.
+fn effect_by_index(battery_available: bool, active: Effects, index: usize) -> Option<Effects> {
+    let effect = lighting::selectable_effects(battery_available, active)
         .into_iter()
         .nth(index)?;
 
@@ -1172,7 +1179,7 @@ fn effect_by_index(battery_available: bool, index: usize) -> Option<Effects> {
 }
 
 fn effect_index(battery_available: bool, effect: Effects) -> Option<usize> {
-    for (index, candidate) in lighting::selectable_effects(battery_available)
+    for (index, candidate) in lighting::selectable_effects(battery_available, effect)
         .into_iter()
         .enumerate()
     {

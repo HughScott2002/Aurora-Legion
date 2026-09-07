@@ -76,7 +76,7 @@ pub struct LightingPage {
 /// the index-to-effect lookup, and its reverse. Two lists would eventually
 /// disagree about what position 8 means, and the symptom would be picking
 /// one effect and getting another.
-pub fn selectable_effects(battery_available: bool) -> Vec<Effects> {
+pub fn selectable_effects(battery_available: bool, active: Effects) -> Vec<Effects> {
     let mut effects = Vec::new();
     for effect in Effects::iter() {
         if effect.needs_a_battery() && !battery_available {
@@ -84,13 +84,39 @@ pub fn selectable_effects(battery_available: bool) -> Vec<Effects> {
         }
         effects.push(effect);
     }
+
+    // The daemon can be showing an effect this machine can no longer start.
+    // A profile that named the gauge while the battery worked still names
+    // it after the battery dies, and the daemon keeps reporting it.
+    //
+    // Leaving it out of the list is worse than it looks. The row would show
+    // whichever effect happens to sit at the position the picker falls
+    // back to, and every colour or brightness edit would still carry the
+    // effect the daemon refuses, so the edit is rejected and the user is
+    // told the battery is missing when they were changing a colour.
+    //
+    // Listing it makes the row honest and gives the user something to pick
+    // their way out with. It goes last so the supported effects keep their
+    // positions, and nothing is rewritten on disk: replace the battery and
+    // the saved profile still works.
+    let mut already_listed = false;
+    for effect in &effects {
+        if effect.same_variant(active) {
+            already_listed = true;
+            break;
+        }
+    }
+    if !already_listed {
+        effects.push(active);
+    }
+
     effects
 }
 
 /// Names for [`selectable_effects`], in the same order.
-pub fn effect_names(battery_available: bool) -> Vec<&'static str> {
+pub fn effect_names(battery_available: bool, active: Effects) -> Vec<&'static str> {
     let mut names = Vec::new();
-    for effect in selectable_effects(battery_available) {
+    for effect in selectable_effects(battery_available, active) {
         let name: &'static str = effect.into();
         names.push(name);
     }
@@ -213,7 +239,7 @@ pub fn build(sender: &ComponentSender<App>) -> LightingPage {
     // Built without the battery effect, because state has not arrived yet
     // and nothing here knows whether this machine has a battery.
     // `set_effects` corrects the list once it does.
-    let names = effect_names(false);
+    let names = effect_names(false, Effects::default());
     let effect_model = gtk::StringList::new(&names);
     let effect_row = adw::ComboRow::new();
     effect_row.set_title("Effect");

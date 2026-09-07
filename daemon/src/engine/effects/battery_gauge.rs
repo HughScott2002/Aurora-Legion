@@ -32,7 +32,13 @@ const READ_INTERVAL: Duration = Duration::from_secs(5);
 /// contract is that a running effect unwinds within tens of milliseconds of
 /// being replaced, so the charge deadline is checked across many short
 /// sleeps rather than slept through in one long one.
-const STOP_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+///
+/// This bounds the unwind: a replacement waits at most one of these plus
+/// whatever read or write is already in flight. Fifty is the slowest value
+/// that still reads as tens of milliseconds, which keeps the wakeups at
+/// twenty a second rather than the fifty that issue #1 deleted from the
+/// engine's own loop.
+const STOP_CHECK_INTERVAL: Duration = Duration::from_millis(50);
 
 pub fn play(manager: &mut Inner, lighting: &Lighting) {
     let Some(battery_dir) = manager.battery_dir.clone() else {
@@ -45,10 +51,30 @@ pub fn play(manager: &mut Inner, lighting: &Lighting) {
         return;
     };
 
-    // None until the first successful read, so the first reading always
-    // draws even if it happens to be a charge already on screen.
+    // The first frame is drawn before the loop, and it is drawn either way.
+    // Falling into the loop without writing would leave whatever the
+    // previous effect painted on the keyboard until a read succeeds, and a
+    // battery that cannot be read at all would leave it there for good.
+    // A charge that will not read shows the slot's own colours undimmed,
+    // which is what a machine with no battery shows and what the app's
+    // preview draws, so the two never disagree.
     let mut drawn_percent: Option<u8> = None;
-    let mut read_at = Instant::now();
+    match battery::read(&battery_dir) {
+        Some(reading) => {
+            if !manager.write_colors(&lighting.battery_gauge_array(reading.percent)) {
+                return;
+            }
+            drawn_percent = Some(reading.percent);
+        }
+        None => {
+            eprintln!("engine: battery unreadable, showing the slot undimmed until it reads");
+            if !manager.write_colors(&lighting.rgb_array()) {
+                return;
+            }
+        }
+    }
+
+    let mut read_at = Instant::now() + READ_INTERVAL;
 
     while !manager
         .stop_signals
