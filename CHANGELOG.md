@@ -13,7 +13,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   switch for it, hidden on machines without a battery.
 - Battery effect: the keyboard as a charge gauge, dimming from the right
   as the battery drains. It uses your own zone colours and only decides
-  how much of each survives. Offered only where there is a battery.
+  how much of each survives. Offered where there is a battery, and
+  wherever the daemon already reports it running.
 - `aurora status` and Settings flag a daemon older than the installed
   build.
 
