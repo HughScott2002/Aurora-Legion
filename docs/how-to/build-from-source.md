@@ -46,8 +46,10 @@ $ cargo build --workspace --features aurora/scrap-pkg-config
 ```
 
 Those four are the pre-push gate, and `hooks/pre-push` runs them for
-you. `cargo fmt --all` fixes what the first one reports. `nix build` produces the packaged build that the release workflow
-ships. Run it before a release, but it is not part of the gate.
+you. `cargo fmt --all` fixes what the first one reports. `nix build`
+verifies the Nix package. The release workflow builds portable artifacts
+with Cargo on Ubuntu. Run `nix build` before a release; it is not part of
+the gate.
 
 ## Build on Ubuntu 24.04
 

@@ -82,10 +82,9 @@ aurora cycle-profile
 Applies the next saved profile, wrapping at the end. If the current
 lighting was never saved, it starts from the first saved profile.
 
-This is meant to be bound to a keyboard shortcut. Aurora does not grab
-keys itself, because a daemon that watches the keyboard has to poll and
-only sees the keys its display server hands it. The desktop already
-does this properly, so bind it there:
+This can be bound to a desktop keyboard shortcut. Aurora also polls for
+Meta+Right Alt, but detection depends on the session. A desktop binding
+avoids that limitation:
 
 Settings, Keyboard, View and Customize Shortcuts, Custom Shortcuts, and
 add `aurora cycle-profile` with whatever key you want. The binding works
@@ -149,6 +148,11 @@ Battery
 `Battery` needs a battery. On a machine without one the daemon refuses
 it, and `aurora list` leaves it out.
 
+To use it, choose Battery on the Lighting page or run
+`aurora set -e Battery -c 255,0,0,0,255,0,0,0,255,255,255,255`.
+Enable Low Battery Alert separately in Settings if you want red lighting
+while discharging at 15% or less.
+
 ## File commands
 
 Load a profile:
@@ -164,6 +168,9 @@ Play a custom effect:
 $ aurora custom-effect --path pulse.json
 custom effect playing
 ```
+
+While Low Battery Alert is showing red, the daemon rejects custom
+effect playback. Turn off Low Battery Alert in Settings to play one.
 
 `set --save FILE` writes a profile file before applying it. It does not
 add the profile to the daemon's named profile list. Save named profiles
@@ -190,7 +197,7 @@ Inspect the daemon:
 
 ```console
 $ aurora status
-daemon:   running (v0.24.1)
+daemon:   running (v0.25.0)
 keyboard: connected
 profile:  (unsaved)
 slot:     1 of 3 (Static effect)

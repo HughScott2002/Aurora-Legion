@@ -83,7 +83,8 @@ To cut version X.Y.Z:
    `docker run --rm -v "$PWD:/src" -w /src ubuntu:24.04 bash contrib/build-tarball.sh`
 6. Commit as `chore(release): vX.Y.Z` and push (the pre-push gate runs
    clippy, the tests and a build). Run `nix build` yourself as well:
-   it is what the release workflow packages and it is not a gate stage.
+   it verifies the Nix package and is not a gate stage. The release
+   workflow builds the portable artifacts with Cargo on Ubuntu.
 7. Tag and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 8. Watch the workflow (`gh run watch`), then download the published
    asset and confirm it unpacks and `bin/aurora --help` runs.

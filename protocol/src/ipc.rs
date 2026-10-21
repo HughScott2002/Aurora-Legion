@@ -438,7 +438,7 @@ mod tests {
                 step_count: 12,
                 should_loop: true,
             }],
-            version: "0.24.1".to_string(),
+            version: "0.25.0".to_string(),
             settings_error: None,
             slot_sync: SubsystemState::Active,
             hotkey: SubsystemState::Unavailable {
@@ -573,7 +573,7 @@ mod tests {
             id: 1,
             resp: Response::Hello {
                 protocol_version: PROTOCOL_VERSION,
-                daemon_version: "0.24.1".to_string(),
+                daemon_version: "0.25.0".to_string(),
             },
         };
 

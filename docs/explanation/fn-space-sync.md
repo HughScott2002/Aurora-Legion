@@ -53,6 +53,10 @@ knows:
 The controller decides lit versus off. The stored selection decides
 which slot. Neither is trusted with the other's question.
 
+This applies at daemon startup. After a USB disconnect during the same
+session, Aurora preserves its current selection when the keyboard
+returns, including when the controller has reset to off.
+
 ## Count events, delay writes
 
 The Fn+Space listener accepts both observed event encodings, matches

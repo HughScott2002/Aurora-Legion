@@ -20,8 +20,12 @@ out action leaves an error message so you can try again.
 Start with:
 
 ```console
+$ aurora doctor
 $ aurora status
 ```
+
+`doctor` checks installation, permissions and the keyboard, with a
+suggested fix for each failure. Include its output in a bug report.
 
 Then use the section that matches its output. `status` names any
 optional subsystem that is not working, with the reason: Fn+Space

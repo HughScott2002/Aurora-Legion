@@ -16,8 +16,8 @@ Two things hold across every milestone:
 
 1. Serve the bottleneck first. Windows has adequate options today;
    Linux does not. Effort goes where users are actually stuck.
-2. Later milestones must not regress earlier ones. `nix build` stays
-   the pre-push gate, and the daemon's measured footprint
+2. Later milestones must not regress earlier ones. `nix build` must pass
+   before pushing, and the daemon's measured footprint
    ([~10 MiB resident](docs/measurements.md)) is a budget, not a brag.
 
 ## M1: Linux flagship polish

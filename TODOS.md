@@ -74,11 +74,3 @@ never executed: #35.
       `Inner` with a real keyboard. Solve once for all of them.
       Issue: #35
 - [ ] Watch the gauge dim against a draining battery. Issue: #35
-
-## Diagnostics
-
-- [ ] `aurora doctor`: enumerate the device, report whether the udev
-      rule is present and whether the ACL actually landed, socket path,
-      daemon and client versions. Subsystem states already carry half of
-      this. The ACL check is the one #20 was invisible against.
-      Issue: #3

@@ -89,7 +89,7 @@ Handshake: send `Hello` first on every new connection.
 
 ```json
 {"id": 1, "req": {"type": "Hello", "protocol_version": 3}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 3, "daemon_version": "0.24.1"}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 3, "daemon_version": "0.25.0"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
@@ -197,7 +197,7 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [{"name": "gaming"}],
   "custom_effects": [{"name": "pulse", "step_count": 12, "should_loop": true}],
-  "version": "0.24.1",
+  "version": "0.25.0",
   "settings_error": null,
   "slot_sync": {"type": "Active"},
   "hotkey": {"type": "Unavailable", "reason": "no display connection"},
@@ -211,7 +211,7 @@ Subscription semantics:
 
 - `current` is the live profile, all three slots. The keyboard shows
   `current.slots[active_slot]` unless a custom effect is playing or
-  `active_slot` is `"Off"`.
+  `active_slot` is `"Off"`, or the low-battery alert is active.
 - `active_slot` is a `SlotSelection`. See below.
 - `custom_effect_playing` is the playing custom effect's display name,
   or `null` when none plays.
@@ -229,7 +229,9 @@ Subscription semantics:
   process. Clients hide the low-battery alert setting when it is false:
   there is nothing to configure and nothing the user could act on.
 - `battery_alert` says whether the low-battery alert may take the
-  keyboard.
+  keyboard. When enabled, it turns lit slots red while discharging at
+  15% charge or less. Charging or disabling the alert restores the
+  selected slot's lighting.
 - `battery_alert_active` says whether the alert is taking the keyboard
   right now. It is false while `active_slot` is `"Off"`, however low the
   battery, because there is nothing lit to turn red. While it is true the
@@ -237,7 +239,9 @@ Subscription semantics:
   still reports the lighting the user chose. The alert is not a profile
   and is never saved into one, so a client that draws the keyboard must
   consult this field or it will claim a look the hardware is not
-  showing.
+  showing. While it is true, `PlayCustomEffect` and
+  `PlayCustomEffectByName` return `InvalidRequest`. Disable the alert
+  with `SetBatteryAlert` before starting a custom effect.
 - `battery_percent` is the charge last read, 0 to 100, or `null` on a
   machine with no battery and before the first read. It is here so a
   client drawing the keyboard can draw the `Battery` effect's gauge; the
@@ -258,7 +262,8 @@ out-of-range slot cannot be represented, let alone sent.
 After the daemon acquires the keyboard this is Aurora's own number, not
 a live controller reading. Aurora's own lighting writes move the
 controller's counter without raising the Fn+Space event, so the counter
-is trusted exactly once, at acquisition. See
+is trusted only at the first acquisition in a daemon session. After a
+USB disconnect, reacquisition preserves Aurora's current selection. See
 [Fn+Space synchronization](explanation/fn-space-sync.md).
 
 ### SubsystemState
@@ -441,7 +446,7 @@ effect picker when `battery_available` is false.
 
 ```text
 C: {"id":1,"req":{"type":"Hello","protocol_version":3}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":3,"daemon_version":"0.24.1"}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":3,"daemon_version":"0.25.0"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}

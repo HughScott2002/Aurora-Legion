@@ -6,9 +6,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-20
+
 ### Added
 
-- Low battery alert: the keyboard turns red below 15 percent on battery.
+- Low battery alert: the keyboard turns red at 15 percent or less on battery.
 - Battery effect: the keyboard as a charge gauge in your own zone
   colours, dimming from the right as the battery drains.
 - `aurora status` and Settings flag a daemon older than the build.
@@ -17,6 +19,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- GUI errors use plain language and persistent recovery actions, with
+  technical diagnostics available separately under Technical Details.
+- Brief keyboard disconnects stay quiet while Aurora reconnects. Longer
+  interruptions offer connection help without opening a dialog.
 - Protocol version 3: `DaemonState` gained `battery_available`,
   `battery_alert`, `battery_alert_active` and `battery_percent`,
   `Effects` gained `Battery`, `KeyboardStatus` gained `Lost`, and
@@ -28,6 +34,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Keep failed service actions visible when status updates arrive during a restart.
+- Keep custom effects from replacing an active low-battery warning.
+- Reconnect an idle keyboard after a USB disconnect, discard the stale
+  handle and restore the selected lighting slot when the controller returns.
+- Keep the control interface responsive while releasing a lost keyboard.
+- Bound GUI service actions and unanswered requests so failed connections
+  do not leave controls waiting indefinitely.
+- Move effect file loading off the GUI thread and explain invalid files
+  with a Choose Another File action.
+- Replace obsolete GUI keyboard permission instructions with the setup guide.
 - Permission-denied hint linked a dead anchor.
 - A keyboard that stops answering reads as lost, not reconnecting (#37).
 - Device errors no longer show hidapi's `hid_error is not implemented
@@ -236,7 +252,8 @@ the point versioning started.
   IdeaPad, and LOQ laptops, via the driver from
   [4JX/L5P-Keyboard-RGB](https://github.com/4JX/L5P-Keyboard-RGB).
 
-[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.24.0
 [0.23.0]: https://github.com/HughScott2002/Aurora-Legion/compare/v0.22.0...v0.23.0

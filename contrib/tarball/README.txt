@@ -13,7 +13,7 @@ Contents
   bin/aurora-gui        GTK4/libadwaita app
   share/                desktop entry and icon
   systemd/              user service unit
-  udev/99-aurora.rules  keyboard access rules
+  udev/70-aurora.rules  keyboard access rules
   install.sh            user-level installer (see below)
 
 Runtime requirements
@@ -62,4 +62,4 @@ Uninstall
   rm ~/.local/share/applications/io.github.HughScott2002.Aurora.desktop
   rm ~/.local/share/icons/hicolor/scalable/apps/io.github.HughScott2002.Aurora.svg
   rm ~/.config/systemd/user/aurora.service
-  sudo rm /etc/udev/rules.d/99-aurora.rules
+  sudo rm /etc/udev/rules.d/70-aurora.rules
