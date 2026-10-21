@@ -250,12 +250,22 @@ fn claim_trace_slot(is_failure: bool) -> Option<u64> {
 
 pub struct Keyboard {
     keyboard_hid: SharedHidDevice,
+    device_path: std::ffi::CString,
     current_state: LightingState,
     stop_signal: Arc<AtomicBool>,
 }
 
 #[allow(dead_code)]
 impl Keyboard {
+    /// The libusb path is the kernel USB port name followed by
+    /// `:configuration.interface`. Keep the identity of the device actually
+    /// opened, so removals of unrelated devices cannot interrupt lighting.
+    pub fn usb_device_name(&self) -> Option<&str> {
+        let path = self.device_path.to_str().ok()?;
+        let (device_name, _) = path.split_once(':')?;
+        Some(device_name)
+    }
+
     pub fn refresh(&mut self) -> Result<()> {
         let payload = self.current_state.build_payload()?;
 
@@ -482,6 +492,7 @@ pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
 
     let keyboard = Keyboard {
         keyboard_hid,
+        device_path: info.path().to_owned(),
         current_state,
         stop_signal,
     };

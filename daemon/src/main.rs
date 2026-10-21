@@ -9,6 +9,7 @@ mod keyboard;
 mod server;
 mod settings;
 mod slot_watch;
+mod usb_watch;
 
 use std::sync::{atomic::AtomicBool, Arc};
 
@@ -101,6 +102,7 @@ fn run_daemon() {
     spawn_signal_listener(command_tx.clone());
     hotkey::spawn(command_tx.clone());
     slot_watch::spawn(command_tx.clone());
+    usb_watch::spawn(command_tx.clone());
 
     // Accept loop on its own thread; it lives for the whole process, so the
     // handle is deliberately not joined.

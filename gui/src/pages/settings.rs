@@ -18,6 +18,7 @@ use crate::{
 pub struct SettingsPage {
     pub root: gtk::Widget,
     pub status_row: adw::ActionRow,
+    pub restart_button: gtk::Button,
     pub autostart_row: adw::SwitchRow,
     pub battery_group: adw::PreferencesGroup,
     pub battery_alert_row: adw::SwitchRow,
@@ -144,6 +145,7 @@ pub fn build(sender: &ComponentSender<App>) -> SettingsPage {
     SettingsPage {
         root: scrolled.upcast(),
         status_row,
+        restart_button,
         autostart_row,
         battery_group,
         battery_alert_row,

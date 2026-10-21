@@ -8,6 +8,10 @@ use relm4::gtk::{self, prelude::*};
 pub const REPOSITORY_URL: &str = "https://github.com/HughScott2002/Aurora-Legion";
 pub const NEW_ISSUE_URL: &str = "https://github.com/HughScott2002/Aurora-Legion/issues/new";
 pub const DISCUSSIONS_URL: &str = "https://github.com/HughScott2002/Aurora-Legion/discussions";
+pub const SETUP_GUIDE_URL: &str =
+    "https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/README.md#how-to-guides";
+pub const CONNECTION_HELP_URL: &str =
+    "https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/how-to/troubleshoot.md";
 
 /// Hand a URL to the desktop's browser.
 ///

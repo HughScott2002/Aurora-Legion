@@ -20,14 +20,18 @@ use relm4::{
 };
 
 use crate::{
-    daemon_actions,
+    daemon_actions::{self, ServiceAction},
     ipc::{self, IpcHandle, IpcUpdate},
     links,
     pages::{custom_effects, lighting, profiles, settings},
+    problem_dialog,
+    problems::{self, Help, Problem, RECOVERY_HELP_DELAY, RECOVERY_NOTICE_DELAY},
 };
 
 const WINDOW_DEFAULT_WIDTH: i32 = 640;
 const WINDOW_DEFAULT_HEIGHT: i32 = 720;
+const SERVICE_ACTION_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_EFFECT_FILE_BYTES: u64 = aurora_protocol::ipc::MAX_LINE_BYTES as u64;
 
 /// How long a locally edited value keeps precedence over daemon snapshots.
 ///
@@ -60,7 +64,13 @@ pub struct App {
 
     /// A start-daemon action is in flight; the button shows it and blocks
     /// double clicks until the daemon connects or the action reports back.
-    daemon_start_pending: bool,
+    pending_service: Option<ServiceAction>,
+    service_request_id: u64,
+    service_deadline: Option<Instant>,
+    recovery_started_at: Option<Instant>,
+    status_refresh: Option<gtk::glib::Source>,
+    problem: Option<Problem>,
+    connection_details: String,
     /// The keyboard connected at least once this session. Distinguishes
     /// "unplugged just now" from "never found one" in the banner.
     keyboard_seen: bool,
@@ -150,15 +160,20 @@ pub enum AppMsg {
         managed: bool,
     },
     ServiceActionFinished {
-        description: String,
+        request_id: u64,
+        action: ServiceAction,
         error: Option<String>,
     },
+    CustomEffectLoaded(Result<aurora_protocol::custom_effect::CustomEffect, String>),
+    RefreshStatus,
+    ProblemAction,
+    ShowProblemDetails,
 }
 
 pub struct AppWidgets {
     toast_overlay: adw::ToastOverlay,
     status_page: adw::StatusPage,
-    permission_banner: adw::Banner,
+    problem_banner: adw::Banner,
     content_stack: gtk::Stack,
     start_button: gtk::Button,
 
@@ -166,6 +181,14 @@ pub struct AppWidgets {
     profiles: profiles::ProfilesPage,
     custom: custom_effects::CustomEffectsPage,
     settings: settings::SettingsPage,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        if let Some(source) = self.status_refresh.take() {
+            source.destroy();
+        }
+    }
 }
 
 impl SimpleComponent for App {
@@ -205,7 +228,13 @@ impl SimpleComponent for App {
             autostart_available: false,
             autostart_enabled: false,
             autostart_managed: false,
-            daemon_start_pending: false,
+            pending_service: None,
+            service_request_id: 0,
+            service_deadline: None,
+            recovery_started_at: None,
+            status_refresh: None,
+            problem: None,
+            connection_details: String::new(),
             keyboard_seen: false,
             pending_toast: Cell::new(None),
             incompatible: None,
@@ -239,13 +268,10 @@ impl SimpleComponent for App {
         // --- Disconnected status page ------------------------------------
         let status_page = adw::StatusPage::new();
         status_page.set_icon_name(Some("keyboard-brightness-symbolic"));
-        status_page.set_title("Aurora Is Not Running");
-        status_page.set_description(Some(
-            "The background service that drives the keyboard lighting is not running. \
-             Start it here, or from a terminal with \u{201c}aurora daemon\u{201d}.",
-        ));
+        status_page.set_title("Connecting to Aurora…");
+        status_page.set_description(Some("Waiting for the lighting service to connect."));
 
-        let start_button = gtk::Button::with_label("Start Aurora");
+        let start_button = gtk::Button::with_label("Start Service");
         start_button.add_css_class("suggested-action");
         start_button.add_css_class("pill");
         start_button.set_halign(gtk::Align::Center);
@@ -253,7 +279,15 @@ impl SimpleComponent for App {
         start_button.connect_clicked(move |_| {
             start_sender.input(AppMsg::StartDaemonRequested);
         });
-        status_page.set_child(Some(&start_button));
+        let status_actions = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        status_actions.set_halign(gtk::Align::Center);
+        status_actions.append(&start_button);
+        let help_button = gtk::Button::with_label("Connection Help");
+        help_button.add_css_class("flat");
+        let help_sender = sender.clone();
+        help_button.connect_clicked(move |_| help_sender.input(AppMsg::ShowProblemDetails));
+        status_actions.append(&help_button);
+        status_page.set_child(Some(&status_actions));
 
         // --- Shell ---------------------------------------------------------
         let content_stack = gtk::Stack::new();
@@ -271,6 +305,7 @@ impl SimpleComponent for App {
 
         // Primary menu (HIG: every app has one, with About).
         let menu = gtk::gio::Menu::new();
+        menu.append(Some("Connection Help"), Some("app.connection-help"));
         menu.append(Some("About Aurora"), Some("app.about"));
         let menu_button = gtk::MenuButton::new();
         menu_button.set_icon_name("open-menu-symbolic");
@@ -278,23 +313,28 @@ impl SimpleComponent for App {
         menu_button.set_menu_model(Some(&menu));
         header_bar.pack_end(&menu_button);
 
+        let help_action = gtk::gio::SimpleAction::new("connection-help", None);
+        let help_sender = sender.clone();
+        help_action.connect_activate(move |_, _| help_sender.input(AppMsg::ShowProblemDetails));
+        relm4::main_application().add_action(&help_action);
+
         let about_action = gtk::gio::SimpleAction::new("about", None);
         about_action.connect_activate(|_, _| {
             show_about_dialog();
         });
         relm4::main_application().add_action(&about_action);
 
-        let permission_banner = adw::Banner::new("");
-        permission_banner.set_revealed(false);
-        // The button is only labeled (and therefore visible) in the
-        // permission-denied state; see update_view.
-        permission_banner.connect_button_clicked(|_| {
-            show_permission_help_dialog();
+        let problem_banner = adw::Banner::new("");
+        problem_banner.set_revealed(false);
+        // Recoverable interruptions need no action until help is useful.
+        let problem_sender = sender.clone();
+        problem_banner.connect_button_clicked(move |_| {
+            problem_sender.input(AppMsg::ProblemAction);
         });
 
         let toolbar_view = adw::ToolbarView::new();
         toolbar_view.add_top_bar(&header_bar);
-        toolbar_view.add_top_bar(&permission_banner);
+        toolbar_view.add_top_bar(&problem_banner);
         toolbar_view.set_content(Some(&content_stack));
 
         // Narrow windows: the wide switcher does not fit in the header, so
@@ -323,7 +363,7 @@ impl SimpleComponent for App {
         let widgets = AppWidgets {
             toast_overlay,
             status_page,
-            permission_banner,
+            problem_banner,
             content_stack,
             start_button,
             lighting,
@@ -498,21 +538,20 @@ impl SimpleComponent for App {
                 }
                 // No optimistic update: the daemon owns which slot is live,
                 // and its broadcast is what moves the rows.
-                self.ipc.send(Request::SelectSlot { slot });
+                self.send_request(Request::SelectSlot { slot });
             }
 
             AppMsg::ProfileActivated { name } => {
-                self.ipc.send(Request::SwitchProfile { name });
+                self.send_request(Request::SwitchProfile { name });
             }
             AppMsg::ProfileDeleted { name } => {
-                self.ipc.send(Request::DeleteProfile { name });
+                self.send_request(Request::DeleteProfile { name });
             }
             AppMsg::SaveProfileDialogRequested => {
                 show_save_profile_dialog(&sender);
             }
             AppMsg::SaveProfileConfirmed { name } => {
                 if name.is_empty() {
-                    self.queue_toast("Profile name cannot be empty");
                     return;
                 }
                 let Some(state) = &self.state else {
@@ -520,60 +559,134 @@ impl SimpleComponent for App {
                 };
                 let mut profile = state.current.clone();
                 profile.name = Some(name);
-                self.ipc.send(Request::AddProfile { profile });
+                self.send_request(Request::AddProfile { profile });
             }
 
             AppMsg::CustomEffectPlayed { name } => {
                 // By name: the daemon holds the body, so it never travels
                 // back to the process that stored it.
-                self.ipc.send(Request::PlayCustomEffectByName { name });
+                self.send_request(Request::PlayCustomEffectByName { name });
             }
             AppMsg::CustomEffectDeleted { name } => {
-                self.ipc.send(Request::DeleteCustomEffect { name });
+                self.send_request(Request::DeleteCustomEffect { name });
             }
             AppMsg::CustomEffectStopped => {
-                self.ipc.send(Request::StopCustomEffect);
+                self.send_request(Request::StopCustomEffect);
             }
             AppMsg::CustomEffectFileRequested => {
                 show_custom_effect_file_dialog(&sender);
             }
             AppMsg::CustomEffectFileChosen { path } => {
-                self.load_custom_effect_file(&path);
+                let load_sender = sender.clone();
+                std::thread::spawn(move || {
+                    load_sender.input(AppMsg::CustomEffectLoaded(read_custom_effect_file(&path)));
+                });
+            }
+            AppMsg::CustomEffectLoaded(result) => match result {
+                Ok(effect) => {
+                    self.problem = None;
+                    self.send_request(Request::AddCustomEffect {
+                        effect: effect.clone(),
+                    });
+                    self.send_request(Request::PlayCustomEffect { effect });
+                }
+                Err(details) => self.problem = Some(Problem::file(details)),
+            },
+            AppMsg::RefreshStatus => {
+                self.status_refresh = None;
+                if self
+                    .service_deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+                {
+                    let title = self
+                        .pending_service
+                        .map(ServiceAction::failure_title)
+                        .unwrap_or("The lighting service did not respond.");
+                    self.pending_service = None;
+                    self.service_deadline = None;
+                    self.problem = Some(Problem {
+                        title,
+                        description:
+                            "The action took too long. You can try again or open connection help.",
+                        details: "The service action exceeded its 15 second deadline.".to_string(),
+                        help: Help::Connection,
+                    });
+                }
+            }
+            AppMsg::ProblemAction => {
+                if let Some(problem) = self.visible_problem() {
+                    if problem.help == Help::EffectFile {
+                        show_custom_effect_file_dialog(&sender);
+                    } else {
+                        problem_dialog::show(&problem);
+                    }
+                }
+            }
+            AppMsg::ShowProblemDetails => {
+                let problem = self.help_problem();
+                problem_dialog::show(&problem);
             }
 
             AppMsg::StartDaemonRequested => {
-                if self.daemon_start_pending {
-                    return;
+                if self.incompatible.is_some() {
+                    problem_dialog::show(&self.help_problem());
+                } else if let Some(request_id) = self.begin_service_action(ServiceAction::Start) {
+                    let deliver_sender = sender.clone();
+                    daemon_actions::start_daemon(
+                        self.autostart_available,
+                        request_id,
+                        move |msg| {
+                            deliver_sender.input(msg);
+                        },
+                    );
                 }
-                self.daemon_start_pending = true;
-                let deliver_sender = sender.clone();
-                daemon_actions::start_daemon(self.autostart_available, move |msg| {
-                    deliver_sender.input(msg);
-                });
             }
             AppMsg::DaemonRestartRequested => {
-                let deliver_sender = sender.clone();
-                daemon_actions::restart_daemon(self.autostart_available, move |msg| {
-                    deliver_sender.input(msg);
-                });
+                if let Some(request_id) = self.begin_service_action(ServiceAction::Restart) {
+                    let deliver_sender = sender.clone();
+                    daemon_actions::restart_daemon(
+                        self.autostart_available,
+                        request_id,
+                        move |msg| {
+                            deliver_sender.input(msg);
+                        },
+                    );
+                }
             }
             AppMsg::AutostartToggled { enabled } => {
                 if enabled == self.autostart_enabled {
                     return; // Echo from update_view.
                 }
                 if !self.autostart_available {
-                    self.queue_toast(
-                        "No systemd unit found. Install the aurora.service unit first",
-                    );
+                    self.problem = Some(Problem {
+                        title: "Start at Login needs to be set up first.",
+                        description: "Open the setup guide to enable this option for your system.",
+                        details: "No aurora.service user unit was found.".to_string(),
+                        help: Help::Setup,
+                    });
                     return;
                 }
                 if self.autostart_managed {
-                    self.queue_toast("Autostart is managed by your home-manager configuration");
+                    self.problem = Some(Problem {
+                        title: "Start at Login is managed by your system configuration.",
+                        description: "Change this option in your system configuration, \
+                                      then reopen Aurora.",
+                        details: "The user service is managed by Home Manager.".to_string(),
+                        help: Help::Setup,
+                    });
                     return;
                 }
+                let action = if enabled {
+                    ServiceAction::EnableAutostart
+                } else {
+                    ServiceAction::DisableAutostart
+                };
+                let Some(request_id) = self.begin_service_action(action) else {
+                    return;
+                };
                 self.autostart_enabled = enabled;
                 let deliver_sender = sender.clone();
-                daemon_actions::set_autostart(enabled, move |msg| {
+                daemon_actions::set_autostart(enabled, request_id, move |msg| {
                     deliver_sender.input(msg);
                 });
             }
@@ -587,7 +700,7 @@ impl SimpleComponent for App {
                 if state.battery_alert == enabled {
                     return; // Echo from update_view.
                 }
-                self.ipc.send(Request::SetBatteryAlert { enabled });
+                self.send_request(Request::SetBatteryAlert { enabled });
             }
             AppMsg::AutostartQueried {
                 available,
@@ -598,10 +711,29 @@ impl SimpleComponent for App {
                 self.autostart_enabled = enabled;
                 self.autostart_managed = managed;
             }
-            AppMsg::ServiceActionFinished { description, error } => {
-                self.daemon_start_pending = false;
-                if let Some(error) = error {
-                    self.queue_toast(&format!("{description}: {error}"));
+            AppMsg::ServiceActionFinished {
+                request_id,
+                action,
+                error,
+            } => {
+                if request_id != self.service_request_id || self.pending_service.is_none() {
+                    return;
+                }
+                if let Some(details) = error {
+                    self.pending_service = None;
+                    self.service_deadline = None;
+                    self.problem = Some(Problem {
+                        title: action.failure_title(),
+                        description: "Try again. If this continues, open the connection help.",
+                        details,
+                        help: Help::Connection,
+                    });
+                } else if matches!(
+                    action,
+                    ServiceAction::EnableAutostart | ServiceAction::DisableAutostart
+                ) {
+                    self.pending_service = None;
+                    self.service_deadline = None;
                 }
                 // Re-query so the switch reflects reality, not intent.
                 let deliver_sender = sender.clone();
@@ -610,42 +742,76 @@ impl SimpleComponent for App {
                 });
             }
         }
+        self.schedule_status_refresh(&sender);
     }
 
     fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
         // --- Connection state ---------------------------------------------
-        // A protocol mismatch replaces the status page text: retrying is
-        // pointless, so the page must stop offering to start a daemon.
-        if let Some(message) = &self.incompatible {
-            widgets.status_page.set_title("Version Mismatch");
-            widgets.status_page.set_description(Some(message));
-            if widgets.start_button.get_visible() {
-                widgets.start_button.set_visible(false);
-            }
+        let (title, description, start_label) = if self.incompatible.is_some() {
+            (
+                "Aurora needs updating",
+                "Some installed parts of Aurora do not match. Open the update steps to reconnect.",
+                "Show Update Steps",
+            )
+        } else if self.pending_service.is_some() {
+            (
+                "Connecting to the lighting service…",
+                "Waiting for Aurora to connect.",
+                "Working…",
+            )
+        } else {
+            (
+                "Lighting controls are unavailable",
+                "Start the lighting service, or open the connection help.",
+                "Start Service",
+            )
+        };
+        if widgets.status_page.title() != title {
+            widgets.status_page.set_title(title);
         }
-
-        let visible_child = if self.connected {
+        if widgets.status_page.description().as_deref() != Some(description) {
+            widgets.status_page.set_description(Some(description));
+        }
+        let visible_child = if self.state.is_some() && self.incompatible.is_none() {
             "main"
         } else {
             "disconnected"
         };
-        let current_child = widgets.content_stack.visible_child_name();
-        if current_child.as_deref() != Some(visible_child) {
+        if widgets.content_stack.visible_child_name().as_deref() != Some(visible_child) {
             widgets.content_stack.set_visible_child_name(visible_child);
         }
-
-        // --- Start button while a start attempt runs ----------------------
-        let start_label = if self.daemon_start_pending {
-            "Starting…"
-        } else {
-            "Start Aurora"
-        };
         if widgets.start_button.label().as_deref() != Some(start_label) {
             widgets.start_button.set_label(start_label);
         }
-        let start_sensitive = !self.daemon_start_pending;
-        if widgets.start_button.is_sensitive() != start_sensitive {
-            widgets.start_button.set_sensitive(start_sensitive);
+        let pending = self.pending_service.is_some();
+        if widgets.start_button.is_sensitive() == pending {
+            widgets.start_button.set_sensitive(!pending);
+        }
+        if widgets.settings.restart_button.is_sensitive() == pending {
+            widgets.settings.restart_button.set_sensitive(!pending);
+        }
+        for page in [
+            &widgets.lighting.root,
+            &widgets.profiles.root,
+            &widgets.custom.root,
+        ] {
+            if page.is_sensitive() != self.connected {
+                page.set_sensitive(self.connected);
+            }
+        }
+        let problem = self.visible_problem();
+        if let Some(problem) = &problem {
+            if widgets.problem_banner.title() != problem.title {
+                widgets.problem_banner.set_title(problem.title);
+            }
+            if widgets.problem_banner.button_label().as_deref() != problem.button_label() {
+                widgets
+                    .problem_banner
+                    .set_button_label(problem.button_label());
+            }
+        }
+        if widgets.problem_banner.is_revealed() != problem.is_some() {
+            widgets.problem_banner.set_revealed(problem.is_some());
         }
 
         // --- Toast ---------------------------------------------------------
@@ -657,54 +823,11 @@ impl SimpleComponent for App {
             return;
         };
 
-        // --- Keyboard status banner ---------------------------------------
-        // The banner is deliberately non-blocking: profile edits still work
-        // without a keyboard and apply when it comes back. The button is
-        // only shown where a user action exists (the udev fix).
-        match &state.keyboard {
-            KeyboardStatus::PermissionDenied { .. } => {
-                widgets
-                    .permission_banner
-                    .set_title("Keyboard found, but access is denied");
-                widgets
-                    .permission_banner
-                    .set_button_label(Some("How to Fix…"));
-                widgets.permission_banner.set_revealed(true);
-            }
-            KeyboardStatus::Searching => {
-                let title = if self.keyboard_seen {
-                    "Keyboard disconnected. Reconnecting automatically…"
-                } else {
-                    "No supported keyboard found. It is picked up automatically when connected"
-                };
-                widgets.permission_banner.set_title(title);
-                widgets.permission_banner.set_button_label(None);
-                widgets.permission_banner.set_revealed(true);
-            }
-            KeyboardStatus::Lost => {
-                widgets.permission_banner.set_title(
-                    "Keyboard stopped responding and left the USB bus. Restarting Aurora will not bring it back; a reboot usually does",
-                );
-                widgets.permission_banner.set_button_label(None);
-                widgets.permission_banner.set_revealed(true);
-            }
-            KeyboardStatus::Error { message } => {
-                widgets.permission_banner.set_title(&format!(
-                    "Keyboard error: {message}. Retrying automatically…"
-                ));
-                widgets.permission_banner.set_button_label(None);
-                widgets.permission_banner.set_revealed(true);
-            }
-            KeyboardStatus::Connected => {
-                widgets.permission_banner.set_revealed(false);
-            }
-        }
-
         // --- Lighting page -------------------------------------------------
         self.sync_lighting_page(&widgets.lighting);
 
         // Lighting edits are disabled while a custom effect plays.
-        let lighting_enabled = state.custom_effect_playing.is_none();
+        let lighting_enabled = self.connected && state.custom_effect_playing.is_none();
         if widgets.lighting.root.is_sensitive() != lighting_enabled {
             widgets.lighting.root.set_sensitive(lighting_enabled);
         }
@@ -727,7 +850,9 @@ impl SimpleComponent for App {
         // binaries without restarting a running daemon, so the app can be
         // newer than the daemon it is talking to.
         let own_version = env!("CARGO_PKG_VERSION");
-        let status_text = if state.version == own_version {
+        let status_text = if !self.connected {
+            "Reconnecting…".to_string()
+        } else if state.version == own_version {
             format!("Running (v{})", state.version)
         } else {
             format!(
@@ -746,11 +871,11 @@ impl SimpleComponent for App {
                 .set_active(self.autostart_enabled);
         }
         let autostart_subtitle = if !self.autostart_available {
-            "No systemd unit installed"
+            "Start at Login is not installed"
         } else if self.autostart_managed {
-            "Managed by your home-manager configuration"
+            "Managed by your system configuration"
         } else {
-            "Enable the systemd user service"
+            "Start the lighting service when you sign in"
         };
         if widgets.settings.autostart_row.subtitle().as_deref() != Some(autostart_subtitle) {
             widgets
@@ -758,7 +883,7 @@ impl SimpleComponent for App {
                 .autostart_row
                 .set_subtitle(autostart_subtitle);
         }
-        let switch_sensitive = self.autostart_available && !self.autostart_managed;
+        let switch_sensitive = self.autostart_available && !self.autostart_managed && !pending;
         if widgets.settings.autostart_row.is_sensitive() != switch_sensitive {
             widgets
                 .settings
@@ -774,6 +899,9 @@ impl SimpleComponent for App {
                 .battery_group
                 .set_visible(state.battery_available);
         }
+        if widgets.settings.battery_group.is_sensitive() != self.connected {
+            widgets.settings.battery_group.set_sensitive(self.connected);
+        }
         if widgets.settings.battery_alert_row.is_active() != state.battery_alert {
             widgets
                 .settings
@@ -784,21 +912,145 @@ impl SimpleComponent for App {
 }
 
 impl App {
+    fn begin_service_action(&mut self, action: ServiceAction) -> Option<u64> {
+        if self.pending_service.is_some() {
+            return None;
+        }
+        self.problem = None;
+        self.service_request_id = self.service_request_id.wrapping_add(1);
+        self.pending_service = Some(action);
+        self.service_deadline = Some(Instant::now() + SERVICE_ACTION_TIMEOUT);
+        Some(self.service_request_id)
+    }
+
+    fn send_request(&mut self, request: Request) {
+        self.problem = None;
+        if !self.connected || !self.ipc.send(request) {
+            self.problem = Some(Problem::connection(
+                "The request could not be queued. The connection may be unavailable or busy."
+                    .to_string(),
+            ));
+        }
+    }
+
+    fn visible_problem(&self) -> Option<Problem> {
+        if self.incompatible.is_some() {
+            return None;
+        }
+        if let Some(state) = &self.state {
+            if let Some(details) = &state.settings_error {
+                return Some(Problem {
+                    title: "Your changes could not be saved.",
+                    description: "Keep Aurora running while you check the details. Your \
+                                  current lighting may not be restored next time.",
+                    details: details.clone(),
+                    help: Help::Details,
+                });
+            }
+        }
+        if let Some(problem) = &self.problem {
+            return Some(problem.clone());
+        }
+        let state = self.state.as_ref()?;
+        let elapsed = self
+            .recovery_started_at
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        if !self.connected {
+            if elapsed < RECOVERY_NOTICE_DELAY {
+                return None;
+            }
+            let mut problem = Problem::connection(self.connection_details.clone());
+            if elapsed < RECOVERY_HELP_DELAY {
+                problem.title = "Reconnecting to the lighting service…";
+                problem.help = Help::Recovering;
+            }
+            return Some(problem);
+        }
+        problems::keyboard_problem(&state.keyboard, self.keyboard_seen, elapsed)
+    }
+
+    fn help_problem(&self) -> Problem {
+        if let Some(details) = &self.incompatible {
+            return Problem::incompatible(details.clone());
+        }
+        self.visible_problem().unwrap_or_else(|| Problem {
+            title: "Connection Help",
+            description: "Open the guide for help with keyboard detection, keyboard access, or \
+                          starting Aurora.",
+            details: self.connection_details.clone(),
+            help: Help::Connection,
+        })
+    }
+
+    fn schedule_status_refresh(&mut self, sender: &ComponentSender<Self>) {
+        if let Some(source) = self.status_refresh.take() {
+            source.destroy();
+        }
+        let now = Instant::now();
+        let mut deadline = self.service_deadline;
+        if let Some(started) = self.recovery_started_at {
+            let elapsed = now.saturating_duration_since(started);
+            let recovery_deadline = if elapsed < RECOVERY_NOTICE_DELAY {
+                Some(started + RECOVERY_NOTICE_DELAY)
+            } else if elapsed < RECOVERY_HELP_DELAY {
+                Some(started + RECOVERY_HELP_DELAY)
+            } else {
+                None
+            };
+            if let Some(recovery_deadline) = recovery_deadline {
+                deadline = Some(
+                    deadline.map_or(recovery_deadline, |current| current.min(recovery_deadline)),
+                );
+            }
+        }
+        let Some(deadline) = deadline else {
+            return;
+        };
+        let refresh_sender = sender.clone();
+        let source = gtk::glib::timeout_source_new(
+            deadline.saturating_duration_since(now),
+            Some("aurora-status-deadline"),
+            gtk::glib::Priority::DEFAULT,
+            move || {
+                refresh_sender.input(AppMsg::RefreshStatus);
+                gtk::glib::ControlFlow::Break
+            },
+        );
+        source.attach(None);
+        self.status_refresh = Some(source);
+    }
+
     fn handle_ipc_update(&mut self, update: IpcUpdate, sender: &ComponentSender<Self>) {
         match update {
-            IpcUpdate::Connected => {
-                self.connected = true;
-                self.daemon_start_pending = false;
-                let deliver_sender = sender.clone();
-                daemon_actions::query_autostart(move |msg| {
-                    deliver_sender.input(msg);
-                });
+            IpcUpdate::Connected => {}
+            IpcUpdate::ConnectionError(details) => self.connection_details = details,
+            IpcUpdate::Unresponsive => {
+                self.connection_details =
+                    "The lighting service did not answer within five seconds.".to_string();
+                self.problem = Some(Problem::connection(self.connection_details.clone()));
+                self.connected = false;
             }
             IpcUpdate::Disconnected => {
                 self.connected = false;
-                self.state = None;
+                if self.state.is_some() && self.recovery_started_at.is_none() {
+                    self.recovery_started_at = Some(Instant::now());
+                }
             }
             IpcUpdate::State(state) => {
+                let connection_restored = !self.connected;
+                if connection_restored {
+                    let deliver_sender = sender.clone();
+                    daemon_actions::query_autostart(move |msg| deliver_sender.input(msg));
+                }
+                self.connected = true;
+                if matches!(
+                    self.pending_service,
+                    Some(ServiceAction::Start | ServiceAction::Restart)
+                ) {
+                    self.pending_service = None;
+                    self.service_deadline = None;
+                }
                 // Toast the recovery transition: the banner already covers
                 // the loss, but its silent disappearance is easy to miss.
                 let was_connected = matches!(
@@ -806,7 +1058,10 @@ impl App {
                     Some(KeyboardStatus::Connected)
                 );
                 let now_connected = matches!(state.keyboard, KeyboardStatus::Connected);
-                if now_connected && !was_connected && self.state.is_some() {
+                let recovery_was_visible = self
+                    .recovery_started_at
+                    .is_some_and(|started| started.elapsed() >= RECOVERY_NOTICE_DELAY);
+                if now_connected && !was_connected && self.state.is_some() && recovery_was_visible {
                     let text = if self.keyboard_seen {
                         "Keyboard reconnected"
                     } else {
@@ -816,6 +1071,17 @@ impl App {
                 }
                 if now_connected {
                     self.keyboard_seen = true;
+                    self.recovery_started_at = None;
+                    if (connection_restored || !was_connected)
+                        && self
+                            .problem
+                            .as_ref()
+                            .is_some_and(|problem| problem.help == Help::Connection)
+                    {
+                        self.problem = None;
+                    }
+                } else if self.recovery_started_at.is_none() {
+                    self.recovery_started_at = Some(Instant::now());
                 }
 
                 // The daemon wins unless the user is mid-edit, in which
@@ -826,8 +1092,8 @@ impl App {
                 }
                 self.state = Some(*state);
             }
-            IpcUpdate::RequestFailed(message) => {
-                self.queue_toast(&message);
+            IpcUpdate::RequestFailed { kind, message } => {
+                self.problem = Some(problems::request_problem(kind, message));
             }
             IpcUpdate::Incompatible(message) => {
                 // Terminal: the worker has stopped, so the window says why
@@ -844,7 +1110,7 @@ impl App {
     /// every other connected client).
     fn push_lighting(&mut self) {
         self.last_local_edit_at = Some(Instant::now());
-        self.ipc.send(Request::SetLighting {
+        self.send_request(Request::SetLighting {
             slot: None,
             lighting: self.lighting.clone(),
         });
@@ -860,39 +1126,6 @@ impl App {
 
     fn queue_toast(&self, text: &str) {
         self.pending_toast.set(Some(text.to_string()));
-    }
-
-    fn load_custom_effect_file(&self, path: &std::path::Path) {
-        let contents = match std::fs::read_to_string(path) {
-            Ok(contents) => contents,
-            Err(error) => {
-                self.queue_toast(&format!("Could not read {}: {error}", path.display()));
-                return;
-            }
-        };
-
-        let mut effect: aurora_protocol::custom_effect::CustomEffect =
-            match serde_json::from_str(&contents) {
-                Ok(effect) => effect,
-                Err(error) => {
-                    self.queue_toast(&format!("Not a valid custom effect file: {error}"));
-                    return;
-                }
-            };
-
-        // Name it after the file when the file itself has no name, so it
-        // can be saved and listed.
-        if effect.name.is_none() {
-            let stem = path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned());
-            effect.name = stem;
-        }
-
-        self.ipc.send(Request::AddCustomEffect {
-            effect: effect.clone(),
-        });
-        self.ipc.send(Request::PlayCustomEffect { effect });
     }
 
     /// Whether this machine has a battery, per the daemon. False before
@@ -1216,13 +1449,23 @@ fn show_save_profile_dialog(sender: &ComponentSender<App>) {
     dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("save"));
     dialog.set_close_response("cancel");
+    dialog.set_response_enabled("save", false);
+    let dialog_for_entry = dialog.downgrade();
+    entry.connect_changed(move |entry| {
+        if let Some(dialog) = dialog_for_entry.upgrade() {
+            dialog.set_response_enabled("save", !entry.text().trim().is_empty());
+        }
+    });
 
     // Enter in the entry saves, matching the suggested response; without
     // this the key press is swallowed by the entry.
     let activate_sender = sender.clone();
     let dialog_for_activate = dialog.downgrade();
     entry.connect_activate(move |entry| {
-        let name = entry.text().to_string();
+        let name = entry.text().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
         activate_sender.input(AppMsg::SaveProfileConfirmed { name });
         if let Some(dialog) = dialog_for_activate.upgrade() {
             dialog.close();
@@ -1235,68 +1478,9 @@ fn show_save_profile_dialog(sender: &ComponentSender<App>) {
             let name = dialog
                 .extra_child()
                 .and_downcast::<gtk::Entry>()
-                .map(|entry| entry.text().to_string())
+                .map(|entry| entry.text().trim().to_string())
                 .unwrap_or_default();
             dialog_sender.input(AppMsg::SaveProfileConfirmed { name });
-        }
-    });
-
-    dialog.present(Some(&window));
-}
-
-/// The udev rule offered by the permission-denied help dialog. Vendor-wide
-/// on purpose: one rule covers every supported model, unlike the
-/// product-specific example in the quick-start guide.
-const UDEV_RULE_TEXT: &str =
-    r#"KERNEL=="hidraw*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="048d", TAG+="uaccess""#;
-
-const SETUP_GUIDE_URL: &str =
-    "https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/quick-start.md#keyboard-access";
-
-fn show_permission_help_dialog() {
-    let Some(window) = relm4::main_application().active_window() else {
-        return;
-    };
-
-    let body = "The keyboard's hidraw device is root-only on most distros. \
-                A udev rule lets your user open it without root.\n\n\
-                On NixOS, enable the flake's hardware module instead. Anywhere else: \
-                save the rule below as /etc/udev/rules.d/99-aurora.rules, run \
-                \u{201c}sudo udevadm control --reload-rules && sudo udevadm trigger\u{201d}, \
-                then replug the keyboard or reboot.";
-
-    let rule_label = gtk::Label::new(Some(UDEV_RULE_TEXT));
-    rule_label.set_selectable(true);
-    rule_label.set_wrap(true);
-    rule_label.add_css_class("monospace");
-    rule_label.set_margin_top(6);
-
-    let dialog = adw::AlertDialog::new(Some("Fix Keyboard Access"), Some(body));
-    dialog.set_extra_child(Some(&rule_label));
-    dialog.add_response("close", "Close");
-    dialog.add_response("copy", "Copy Rule");
-    dialog.add_response("guide", "Open Setup Guide");
-    dialog.set_response_appearance("copy", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("copy"));
-    dialog.set_close_response("close");
-
-    dialog.connect_response(None, move |_dialog, response| {
-        if response == "copy" {
-            if let Some(display) = gtk::gdk::Display::default() {
-                display.clipboard().set_text(UDEV_RULE_TEXT);
-            }
-        }
-        if response == "guide" {
-            let launcher = gtk::UriLauncher::new(SETUP_GUIDE_URL);
-            launcher.launch(
-                None::<&gtk::Window>,
-                None::<&gtk::gio::Cancellable>,
-                |result| {
-                    if let Err(error) = result {
-                        eprintln!("app: could not open setup guide: {error}");
-                    }
-                },
-            );
         }
     });
 
@@ -1374,4 +1558,69 @@ fn show_custom_effect_file_dialog(sender: &ComponentSender<App>) {
             }
         },
     );
+}
+
+fn read_custom_effect_file(
+    path: &std::path::Path,
+) -> Result<aurora_protocol::custom_effect::CustomEffect, String> {
+    use std::io::Read;
+
+    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_EFFECT_FILE_BYTES {
+        return Err("Choose a regular Aurora effect file smaller than one mebibyte.".to_string());
+    }
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut contents = String::new();
+    file.take(MAX_EFFECT_FILE_BYTES + 1)
+        .read_to_string(&mut contents)
+        .map_err(|error| error.to_string())?;
+    if contents.len() as u64 > MAX_EFFECT_FILE_BYTES {
+        return Err("The effect file is too large.".to_string());
+    }
+    let mut effect: aurora_protocol::custom_effect::CustomEffect =
+        serde_json::from_str(&contents).map_err(|error| error.to_string())?;
+    if effect.name.is_none() {
+        effect.name = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned());
+    }
+    Ok(effect)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_and_oversized_effect_files_are_rejected() {
+        let path = std::env::temp_dir().join(format!("aurora-invalid-{}.json", std::process::id()));
+        std::fs::write(&path, "not an effect").expect("write fixture");
+        assert!(read_custom_effect_file(&path).is_err());
+        let file = std::fs::File::create(&path).expect("create fixture");
+        file.set_len(MAX_EFFECT_FILE_BYTES + 1)
+            .expect("size fixture");
+        assert!(read_custom_effect_file(&path).is_err());
+        std::fs::remove_file(path).expect("remove fixture");
+        assert!(read_custom_effect_file(&std::env::temp_dir()).is_err());
+    }
+
+    #[test]
+    fn a_valid_unnamed_effect_uses_the_file_name() {
+        let stem = format!("aurora-effect-{}", std::process::id());
+        let path = std::env::temp_dir().join(format!("{stem}.json"));
+        let contents = r#"{
+            "name": null,
+            "effect_steps": [{
+                "rgb_array": [0,0,0,0,0,0,0,0,0,0,0,0],
+                "step_type": "Set", "brightness": 1, "steps": 1,
+                "delay_between_steps": 0, "sleep": 10
+            }],
+            "should_loop": false
+        }"#;
+        std::fs::write(&path, contents).expect("write fixture");
+        let effect = read_custom_effect_file(&path).expect("read fixture");
+        assert_eq!(effect.name.as_deref(), Some(stem.as_str()));
+        assert_eq!(effect.effect_steps.len(), 1);
+        std::fs::remove_file(path).expect("remove fixture");
+    }
 }

@@ -84,6 +84,13 @@ pub enum Command {
     /// The Fn+Space "light profile change" event fired; sent by the slot
     /// watcher thread. The core advances its slot once per event.
     HardwareSlotEvent,
+    /// A kernel USB removal, including while the effect engine is idle.
+    KeyboardRemoved {
+        device_name: String,
+    },
+    /// A dropped notification means the current handle can no longer be trusted.
+    UsbEventsLost,
+    KeyboardReleased,
     /// SIGTERM/SIGINT arrived; sent by the signal listener thread so the
     /// core wakes immediately instead of on its next tick.
     ShutdownSignal,
@@ -121,6 +128,10 @@ pub struct Core {
     /// from one that was never here: both leave the bus empty, but only the
     /// first has a user watching for it to come back.
     keyboard_lost_at: Option<Instant>,
+    /// The USB port behind the open handle, not another supported keyboard.
+    keyboard_device_name: Option<String>,
+    /// Cleanup runs off-core; reopening waits until it releases the old handle.
+    keyboard_releasing: bool,
 
     engine: Option<EffectManager>,
     stop_signals: StopSignals,
@@ -186,6 +197,8 @@ pub fn run(
         custom_effect_playing: None,
         keyboard_status: KeyboardStatus::Searching,
         keyboard_lost_at: None,
+        keyboard_device_name: None,
+        keyboard_releasing: false,
         engine: None,
         stop_signals: StopSignals::new(),
         slot_apply_at: None,
@@ -245,14 +258,28 @@ impl Core {
             return;
         }
 
+        self.release_keyboard();
+    }
+
+    fn release_keyboard(&mut self) {
         eprintln!("core: keyboard lost, re-entering acquisition");
+        // A driver call or effect may still be unwinding. Keep serving IPC
+        // while cleanup waits, and allow only one retiring engine at a time.
+        let slot_reader = self.slot_reader.take();
         if let Some(engine) = self.engine.take() {
-            engine.shutdown();
+            self.keyboard_releasing = true;
+            let command_tx = self.command_tx.clone();
+            std::thread::spawn(move || {
+                // The last shared HID handle must also close off-core.
+                drop(slot_reader);
+                engine.shutdown();
+                let _ = command_tx.send(Command::KeyboardReleased);
+            });
         }
 
         self.stop_signals = StopSignals::new();
+        self.keyboard_device_name = None;
         self.slot_apply_at = None;
-        self.slot_reader = None;
         self.slot_trace_at = None;
         self.keyboard_status = KeyboardStatus::Searching;
         self.keyboard_lost_at = Some(Instant::now());
@@ -262,10 +289,7 @@ impl Core {
     }
 
     fn try_acquire_keyboard_if_due(&mut self) {
-        if self.engine.is_some() {
-            return;
-        }
-        if Instant::now() < self.next_acquire_at {
+        if !self.keyboard_acquisition_is_due() {
             return;
         }
 
@@ -280,7 +304,12 @@ impl Core {
                 // first lighting report.
                 let slot_reader = keyboard.slot_reader();
                 let counter_result = slot_reader.read_slot_counter();
-                self.active_slot = anchor_slot(self.active_slot, counter_result);
+                self.active_slot = anchor_slot(
+                    self.active_slot,
+                    counter_result,
+                    self.keyboard_lost_at.is_some(),
+                );
+                self.keyboard_device_name = keyboard.usb_device_name().map(str::to_string);
 
                 let engine = EffectManager::new(
                     *keyboard,
@@ -307,6 +336,10 @@ impl Core {
                 }
             }
         }
+    }
+
+    fn keyboard_acquisition_is_due(&self) -> bool {
+        self.engine.is_none() && !self.keyboard_releasing && Instant::now() >= self.next_acquire_at
     }
 
     // --- Command handling ------------------------------------------------
@@ -337,6 +370,19 @@ impl Core {
             Command::HardwareSlotEvent => {
                 self.advance_slot();
             }
+            Command::KeyboardRemoved { device_name } => {
+                if self.keyboard_device_name.as_deref() == Some(device_name.as_str()) {
+                    eprintln!("core: USB controller {device_name} removed");
+                    self.release_keyboard();
+                }
+            }
+            Command::UsbEventsLost => {
+                if self.keyboard_device_name.is_some() {
+                    eprintln!("core: USB notifications lost, reopening the controller");
+                    self.release_keyboard();
+                }
+            }
+            Command::KeyboardReleased => self.keyboard_releasing = false,
             Command::ShutdownSignal => {
                 self.shutdown_requested = true;
             }
@@ -1009,7 +1055,8 @@ impl Core {
 }
 
 /// Decide the slot to start from, given the persisted selection and a
-/// counter read taken before Aurora has written anything.
+/// counter read taken before Aurora has written anything. A reconnect keeps
+/// Aurora's live selection: a controller reset is not a user choosing off.
 ///
 /// The two sources know different things. The controller knows whether the
 /// user left the backlight off, which Aurora cannot know across a restart.
@@ -1023,7 +1070,12 @@ impl Core {
 fn anchor_slot(
     persisted: SlotSelection,
     counter_result: Result<u8, legion_rgb_driver::error::Error>,
+    reconnecting: bool,
 ) -> SlotSelection {
+    if reconnecting {
+        return persisted;
+    }
+
     let counter = match counter_result {
         Ok(counter) => counter,
         Err(error) => {
@@ -1197,6 +1249,106 @@ mod tests {
         Lighting, Profile, BATTERY_ALERT_PERCENT,
     };
 
+    fn connected_core() -> super::Core {
+        let (command_tx, _) = crossbeam_channel::bounded(crate::COMMAND_QUEUE_CAPACITY);
+        super::Core {
+            command_tx,
+            settings: crate::settings::Settings::default(),
+            current_profile: Profile::default(),
+            active_slot: SlotSelection::Second,
+            custom_effect_playing: None,
+            keyboard_status: aurora_protocol::ipc::KeyboardStatus::Connected,
+            keyboard_lost_at: None,
+            keyboard_device_name: Some("5-1.3".to_string()),
+            keyboard_releasing: false,
+            engine: None,
+            stop_signals: crate::engine::StopSignals::new(),
+            slot_apply_at: None,
+            slot_reader: None,
+            slot_trace_at: None,
+            subscribers: Vec::new(),
+            settings_dirty: false,
+            settings_error: None,
+            last_change_at: std::time::Instant::now(),
+            acquire_attempt_count: 0,
+            next_acquire_at: std::time::Instant::now(),
+            slot_sync: aurora_protocol::ipc::SubsystemState::Unknown,
+            hotkey: aurora_protocol::ipc::SubsystemState::Unknown,
+            screen_capture: aurora_protocol::ipc::SubsystemState::Inactive,
+            battery_dir: None,
+            battery_alert_active: false,
+            battery_percent: None,
+            battery_read_at: std::time::Instant::now(),
+            shutdown_requested: false,
+        }
+    }
+
+    #[test]
+    fn removing_an_idle_keyboard_starts_recovery_without_a_write() {
+        let mut core = connected_core();
+        core.handle_command(super::Command::KeyboardRemoved {
+            device_name: "5-1.3".to_string(),
+        });
+
+        assert_eq!(
+            core.keyboard_status,
+            aurora_protocol::ipc::KeyboardStatus::Searching
+        );
+        assert!(core.keyboard_device_name.is_none());
+        assert!(core.keyboard_lost_at.is_some());
+        assert_eq!(core.active_slot, SlotSelection::Second);
+        assert!(core.next_acquire_at <= std::time::Instant::now());
+    }
+
+    #[test]
+    fn removing_another_usb_device_does_not_interrupt_lighting() {
+        let mut core = connected_core();
+        core.handle_command(super::Command::KeyboardRemoved {
+            device_name: "5-1.2".to_string(),
+        });
+
+        assert_eq!(
+            core.keyboard_status,
+            aurora_protocol::ipc::KeyboardStatus::Connected
+        );
+        assert_eq!(core.keyboard_device_name.as_deref(), Some("5-1.3"));
+        assert!(core.keyboard_lost_at.is_none());
+    }
+
+    #[test]
+    fn dropped_usb_events_invalidate_the_idle_handle() {
+        let mut core = connected_core();
+        core.handle_command(super::Command::UsbEventsLost);
+
+        assert_eq!(
+            core.keyboard_status,
+            aurora_protocol::ipc::KeyboardStatus::Searching
+        );
+        assert!(core.keyboard_device_name.is_none());
+    }
+
+    #[test]
+    fn engine_release_completion_allows_reacquisition() {
+        let mut core = connected_core();
+        core.keyboard_releasing = true;
+        assert!(!core.keyboard_acquisition_is_due());
+        core.handle_command(super::Command::KeyboardReleased);
+        assert!(!core.keyboard_releasing);
+        assert!(core.keyboard_acquisition_is_due());
+    }
+
+    #[test]
+    fn a_reconnected_controller_keeps_the_selected_slot_even_if_firmware_is_off() {
+        assert_eq!(
+            anchor_slot(SlotSelection::Second, Ok(4), true),
+            SlotSelection::Second
+        );
+        assert_eq!(
+            anchor_slot(SlotSelection::Off, Ok(1), true),
+            SlotSelection::Off
+        );
+    }
+
     fn reading(percent: u8, discharging: bool) -> battery::Reading {
         battery::Reading {
             percent,
@@ -1293,7 +1445,7 @@ mod tests {
     fn off_on_the_counter_wins_over_any_stored_slot() {
         // The user pressed Fn+Space to off while the daemon was down. Only
         // the controller knows that.
-        let anchored = anchor_slot(SlotSelection::Second, Ok(4));
+        let anchored = anchor_slot(SlotSelection::Second, Ok(4), false);
         assert_eq!(anchored, SlotSelection::Off);
     }
 
@@ -1301,13 +1453,13 @@ mod tests {
     fn a_lit_counter_keeps_the_stored_slot() {
         // The counter says lit but its number is unreliable, because
         // Aurora's own writes moved it last session. The stored slot wins.
-        let anchored = anchor_slot(SlotSelection::Third, Ok(1));
+        let anchored = anchor_slot(SlotSelection::Third, Ok(1), false);
         assert_eq!(anchored, SlotSelection::Third);
     }
 
     #[test]
     fn a_lit_counter_recovers_from_a_stored_off() {
-        let anchored = anchor_slot(SlotSelection::Off, Ok(2));
+        let anchored = anchor_slot(SlotSelection::Off, Ok(2), false);
         assert_eq!(anchored, SlotSelection::First);
     }
 
@@ -1318,7 +1470,7 @@ mod tests {
         let read_error = Error::RangeError(RangeError {
             kind: RangeErrorKind::Slot,
         });
-        let anchored = anchor_slot(SlotSelection::Third, Err(read_error));
+        let anchored = anchor_slot(SlotSelection::Third, Err(read_error), false);
         assert_eq!(anchored, SlotSelection::Third);
     }
 
@@ -1326,9 +1478,12 @@ mod tests {
     fn a_mid_transition_counter_keeps_the_stored_slot() {
         // Observed live: 0 persisted for over 20 seconds on a 2023 Pro.
         assert_eq!(
-            anchor_slot(SlotSelection::Second, Ok(0)),
+            anchor_slot(SlotSelection::Second, Ok(0), false),
             SlotSelection::Second
         );
-        assert_eq!(anchor_slot(SlotSelection::Off, Ok(9)), SlotSelection::Off);
+        assert_eq!(
+            anchor_slot(SlotSelection::Off, Ok(9), false),
+            SlotSelection::Off
+        );
     }
 }

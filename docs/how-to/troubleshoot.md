@@ -1,5 +1,22 @@
 # Troubleshoot Aurora
 
+## Resolve an error in the app
+
+Use the action beside the error message for setup steps, connection help,
+or another effect file. Technical Details contains the diagnostic text;
+Copy Details copies it for a bug report.
+
+Brief keyboard disconnects stay quiet. After two seconds, Aurora shows
+that it is reconnecting. After ten seconds, or when the keyboard is
+reported lost, it offers Connection Help. Reconnection happens
+automatically, and no dialog interrupts your work.
+
+If the lighting service is unavailable, use Start Service. If it is
+running but not responding, use Restart in Settings. A failed or timed
+out action leaves an error message so you can try again.
+
+## Diagnose from a terminal
+
 Start with:
 
 ```console
@@ -154,9 +171,9 @@ $ ldd "$HOME/.local/bin/aurora-gui" | grep 'not found'
 
 The AppImage bundles these libraries. Report a failure there as a bug.
 
-If the GUI closes when the daemon disconnects, restart the daemon and
-open the GUI again. Graceful disconnect handling remains tracked in
-[issue #14](https://github.com/HughScott2002/Aurora-Legion/issues/14).
+The GUI keeps your last view when the daemon disconnects and reconnects
+automatically. Controls that need the service become available again
+when it responds.
 
 A GUI that reports a version mismatch is talking to a daemon from a
 different release. It stops rather than staying connected and misreading
