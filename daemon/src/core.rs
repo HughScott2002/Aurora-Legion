@@ -724,6 +724,12 @@ impl Core {
         if let Some(rejection) = validate_custom_effect(&effect) {
             return rejection;
         }
+        if self.battery_alert_is_showing() {
+            return error_response(
+                ErrorKind::InvalidRequest,
+                "Turn off Low Battery Alert in Settings before playing a custom effect.",
+            );
+        }
 
         let display_name = match &effect.name {
             Some(name) => name.clone(),
@@ -1240,7 +1246,7 @@ fn error_response(kind: ErrorKind, message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use aurora_protocol::ipc::SlotSelection;
+    use aurora_protocol::ipc::{Response, SlotSelection};
     use legion_rgb_driver::error::{Error, RangeError, RangeErrorKind};
     use strum::IntoEnumIterator;
 
@@ -1347,6 +1353,30 @@ mod tests {
             anchor_slot(SlotSelection::Off, Ok(1), true),
             SlotSelection::Off
         );
+    }
+
+    #[test]
+    fn custom_playback_cannot_replace_an_active_battery_warning() {
+        use aurora_protocol::custom_effect::{CustomEffect, EffectStep, EffectType};
+
+        let mut core = connected_core();
+        core.battery_alert_active = true;
+        let effect = CustomEffect {
+            name: Some("Test".to_string()),
+            effect_steps: vec![EffectStep {
+                rgb_array: [0; 12],
+                step_type: EffectType::Set,
+                brightness: 1,
+                steps: 1,
+                delay_between_steps: 0,
+                sleep: 10,
+            }],
+            should_loop: false,
+        };
+        let response = core.play_custom_effect(effect);
+        assert!(matches!(response, Response::Error { .. }));
+        assert!(core.custom_effect_playing.is_none());
+        assert!(core.battery_alert_is_showing());
     }
 
     fn reading(percent: u8, discharging: bool) -> battery::Reading {

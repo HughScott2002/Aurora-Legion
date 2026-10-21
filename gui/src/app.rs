@@ -65,6 +65,7 @@ pub struct App {
     /// A start-daemon action is in flight; the button shows it and blocks
     /// double clicks until the daemon connects or the action reports back.
     pending_service: Option<ServiceAction>,
+    service_command_finished: bool,
     service_request_id: u64,
     service_deadline: Option<Instant>,
     recovery_started_at: Option<Instant>,
@@ -229,6 +230,7 @@ impl SimpleComponent for App {
             autostart_enabled: false,
             autostart_managed: false,
             pending_service: None,
+            service_command_finished: false,
             service_request_id: 0,
             service_deadline: None,
             recovery_started_at: None,
@@ -734,6 +736,12 @@ impl SimpleComponent for App {
                 ) {
                     self.pending_service = None;
                     self.service_deadline = None;
+                } else {
+                    // A state broadcast from the old daemon cannot confirm
+                    // a restart. First require the command to succeed, then
+                    // ask the connected daemon for a fresh snapshot.
+                    self.service_command_finished = true;
+                    self.ipc.send(Request::GetState);
                 }
                 // Re-query so the switch reflects reality, not intent.
                 let deliver_sender = sender.clone();
@@ -919,12 +927,29 @@ impl App {
         self.problem = None;
         self.service_request_id = self.service_request_id.wrapping_add(1);
         self.pending_service = Some(action);
+        self.service_command_finished = false;
         self.service_deadline = Some(Instant::now() + SERVICE_ACTION_TIMEOUT);
         Some(self.service_request_id)
     }
 
     fn send_request(&mut self, request: Request) {
         self.problem = None;
+        if matches!(
+            request,
+            Request::PlayCustomEffect { .. } | Request::PlayCustomEffectByName { .. }
+        ) && self
+            .state
+            .as_ref()
+            .is_some_and(|state| state.battery_alert_active)
+        {
+            self.problem = Some(Problem {
+                title: "Low Battery Alert is active.",
+                description: "Turn off Low Battery Alert in Settings to play a custom effect.",
+                details: "Custom playback cannot replace an active battery warning.".to_string(),
+                help: Help::Details,
+            });
+            return;
+        }
         if !self.connected || !self.ipc.send(request) {
             self.problem = Some(Problem::connection(
                 "The request could not be queued. The connection may be unavailable or busy."
@@ -1044,10 +1069,12 @@ impl App {
                     daemon_actions::query_autostart(move |msg| deliver_sender.input(msg));
                 }
                 self.connected = true;
-                if matches!(
-                    self.pending_service,
-                    Some(ServiceAction::Start | ServiceAction::Restart)
-                ) {
+                if self.service_command_finished
+                    && matches!(
+                        self.pending_service,
+                        Some(ServiceAction::Start | ServiceAction::Restart)
+                    )
+                {
                     self.pending_service = None;
                     self.service_deadline = None;
                 }

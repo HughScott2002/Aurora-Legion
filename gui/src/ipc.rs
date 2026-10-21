@@ -128,12 +128,11 @@ where
         let stream = match connect_result {
             Ok(stream) => stream,
             Err(error) => {
-                if attempt_count == 0 {
-                    if !deliver(IpcUpdate::ConnectionError(error.to_string()))
-                        || !deliver(IpcUpdate::Disconnected)
-                    {
-                        return;
-                    }
+                if attempt_count == 0
+                    && (!deliver(IpcUpdate::ConnectionError(error.to_string()))
+                        || !deliver(IpcUpdate::Disconnected))
+                {
+                    return;
                 }
                 let last_index = RECONNECT_BACKOFF.len() - 1;
                 let delay = RECONNECT_BACKOFF[attempt_count.min(last_index)];
