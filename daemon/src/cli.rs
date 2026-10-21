@@ -20,6 +20,7 @@ use clap::{Args, Subcommand};
 use strum::IntoEnumIterator;
 
 use crate::{
+    battery,
     client::{Client, ClientError},
     engine::{EffectManager, StopSignals},
     keyboard::{self, AcquireOutcome},
@@ -35,6 +36,9 @@ pub enum ClientCommand {
 
     /// Show daemon and keyboard status
     Status,
+
+    /// Check this machine for anything stopping Aurora working
+    Doctor(DoctorArgs),
 
     /// Switch to the next saved profile
     CycleProfile,
@@ -59,6 +63,13 @@ pub enum ClientCommand {
 
     /// Ask a running daemon to exit
     Shutdown,
+}
+
+#[derive(Args)]
+pub struct DoctorArgs {
+    /// Print the report as JSON instead of text
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -109,36 +120,70 @@ pub struct SetArgs {
     save: Option<PathBuf>,
 }
 
+/// The effects this machine can run.
+///
+/// `Battery` needs a battery and the daemon refuses it without one, so
+/// neither `aurora list` nor an error message offers it here. The probe
+/// happens locally rather than over IPC because `aurora list` has never
+/// needed a running daemon, and needing one to name the effects would be a
+/// worse trade than one directory listing.
+fn available_effects() -> Vec<Effects> {
+    let battery_available = battery::probe().is_some();
+
+    let mut effects = Vec::new();
+    for effect in Effects::iter() {
+        if effect.needs_a_battery() && !battery_available {
+            continue;
+        }
+        effects.push(effect);
+    }
+    effects
+}
+
+/// Parsing stays permissive: the daemon decides what it will run, and a
+/// name it would refuse gets an error from the daemon that says why. Only
+/// the suggestion list is narrowed, so a typo is not answered with a name
+/// that would not have worked either.
 fn parse_effect(arg: &str) -> Result<Effects, String> {
     match Effects::from_str(arg) {
         Ok(effect) => Ok(effect),
         Err(_) => {
             let mut names: Vec<&'static str> = Vec::new();
-            for effect in Effects::iter() {
+            for effect in available_effects() {
                 names.push(effect.into());
             }
-            Err(format!("unknown effect '{arg}', expected one of: {}", names.join(", ")))
+            Err(format!(
+                "unknown effect '{arg}', expected one of: {}",
+                names.join(", ")
+            ))
         }
     }
 }
 
 fn parse_brightness(arg: &str) -> Result<Brightness, String> {
-    Brightness::from_str(arg).map_err(|_| format!("unknown brightness '{arg}', expected Low or High"))
+    Brightness::from_str(arg)
+        .map_err(|_| format!("unknown brightness '{arg}', expected Low or High"))
 }
 
 fn parse_direction(arg: &str) -> Result<Direction, String> {
-    Direction::from_str(arg).map_err(|_| format!("unknown direction '{arg}', expected Left or Right"))
+    Direction::from_str(arg)
+        .map_err(|_| format!("unknown direction '{arg}', expected Left or Right"))
 }
 
 fn parse_colors(arg: &str) -> Result<[u8; 12], String> {
     let mut parsed: Vec<u8> = Vec::with_capacity(12);
     for part in arg.split(',') {
-        let value = part.trim().parse::<u8>().map_err(|_| format!("'{part}' is not a number between 0 and 255"))?;
+        let value = part
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| format!("'{part}' is not a number between 0 and 255"))?;
         parsed.push(value);
     }
 
     let count = parsed.len();
-    let colors: [u8; 12] = parsed.try_into().map_err(|_| format!("expected 12 comma-separated values (4 RGB triplets), got {count}"))?;
+    let colors: [u8; 12] = parsed
+        .try_into()
+        .map_err(|_| format!("expected 12 comma-separated values (4 RGB triplets), got {count}"))?;
     Ok(colors)
 }
 
@@ -146,18 +191,21 @@ pub fn run(command: ClientCommand) -> ExitCode {
     match command {
         ClientCommand::List => {
             println!("List of available effects:");
-            for (index, effect) in Effects::iter().enumerate() {
+            for (index, effect) in available_effects().into_iter().enumerate() {
                 println!("{}. {effect}", index + 1);
             }
             ExitCode::SUCCESS
         }
         ClientCommand::Status => run_status(),
+        ClientCommand::Doctor(args) => crate::doctor::run(args.json),
         ClientCommand::Set(args) => run_set(&args),
         ClientCommand::CycleProfile => run_simple_request(Request::CycleProfile, "profile cycled"),
         ClientCommand::Slot(args) => run_slot(&args),
         ClientCommand::LoadProfile { path } => run_load_profile(&path),
         ClientCommand::CustomEffect { path } => run_custom_effect(&path),
-        ClientCommand::Stop => run_simple_request(Request::StopCustomEffect, "custom effect stopped"),
+        ClientCommand::Stop => {
+            run_simple_request(Request::StopCustomEffect, "custom effect stopped")
+        }
         ClientCommand::Shutdown => run_simple_request(Request::Shutdown, "daemon asked to exit"),
     }
 }
@@ -204,16 +252,29 @@ fn run_status() -> ExitCode {
             println!("keyboard: permission denied ({message})");
             println!("          install the udev rule: https://github.com/HughScott2002/Aurora-Legion/blob/main/docs/how-to/install-linux.md#grant-keyboard-access");
         }
-        aurora_protocol::ipc::KeyboardStatus::Error { message } => println!("keyboard: error ({message})"),
+        aurora_protocol::ipc::KeyboardStatus::Lost => {
+            println!("keyboard: stopped responding and left the USB bus");
+            println!("          restarting the daemon will not open it again; reboot to recover");
+        }
+        aurora_protocol::ipc::KeyboardStatus::Error { message } => {
+            println!("keyboard: error ({message})")
+        }
     }
 
-    let profile_name = state.current.name.clone().unwrap_or_else(|| "(unsaved)".to_string());
+    let profile_name = state
+        .current
+        .name
+        .clone()
+        .unwrap_or_else(|| "(unsaved)".to_string());
     println!("profile:  {profile_name}");
 
     match state.active_slot.index() {
         Some(slot_index) => {
             let lighting = &state.current.slots[slot_index];
-            println!("slot:     {} of {SLOT_COUNT} ({} effect)", state.active_slot, lighting.effect);
+            println!(
+                "slot:     {} of {SLOT_COUNT} ({} effect)",
+                state.active_slot, lighting.effect
+            );
         }
         None => println!("slot:     off (Fn+Space turns the backlight back on)"),
     }
@@ -229,11 +290,22 @@ fn run_status() -> ExitCode {
     print_subsystem("hotkey", &state.hotkey);
     print_subsystem("capture", &state.screen_capture);
 
+    // Same rule as the subsystems above: an armed alert is not news. One
+    // the user switched off is, because it explains a keyboard that stayed
+    // quiet all the way down to empty.
+    if state.battery_available && !state.battery_alert {
+        println!("battery:  low battery alert is off");
+    }
+
     let mut saved_names: Vec<String> = Vec::new();
     for profile in &state.profiles {
         saved_names.push(profile.name.clone());
     }
-    println!("saved:    {} profiles ({})", state.profiles.len(), saved_names.join(", "));
+    println!(
+        "saved:    {} profiles ({})",
+        state.profiles.len(),
+        saved_names.join(", ")
+    );
 
     ExitCode::SUCCESS
 }
@@ -347,7 +419,10 @@ fn run_load_profile(path: &Path) -> ExitCode {
 
 fn apply_lighting_directly(lighting: &Lighting) -> ExitCode {
     if !lighting.effect.is_built_in() {
-        eprintln!("aurora: no daemon is running, and the {} effect needs one (it is software-driven).", lighting.effect);
+        eprintln!(
+            "aurora: no daemon is running, and the {} effect needs one (it is software-driven).",
+            lighting.effect
+        );
         eprintln!("           start the daemon with: aurora daemon");
         return ExitCode::FAILURE;
     }
@@ -363,7 +438,9 @@ fn apply_lighting_directly(lighting: &Lighting) -> ExitCode {
         }
     };
 
-    let engine = EffectManager::new(*keyboard, stop_signals, None);
+    // No battery path: this path runs hardware effects only, and the
+    // Battery effect is not one of them.
+    let engine = EffectManager::new(*keyboard, stop_signals, None, None);
     engine.set_lighting(lighting.clone());
     engine.shutdown();
 
@@ -409,7 +486,10 @@ fn run_custom_effect(path: &Path) -> ExitCode {
     let effect = match CustomEffect::from_file(path) {
         Ok(effect) => effect,
         Err(_) => {
-            eprintln!("aurora: could not load custom effect from {}", path.display());
+            eprintln!(
+                "aurora: could not load custom effect from {}",
+                path.display()
+            );
             return ExitCode::FAILURE;
         }
     };

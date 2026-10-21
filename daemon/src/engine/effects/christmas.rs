@@ -8,7 +8,11 @@ pub fn play(manager: &mut Inner, rng: &mut rand::rngs::ThreadRng) {
     let xmas_color_array = [[255, 10, 10], [255, 255, 20], [30, 255, 30], [70, 70, 255]];
     let subeffect_count = 4;
     let mut last_subeffect = -1;
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
         let mut subeffect = rng.random_range(0..subeffect_count);
         while last_subeffect == subeffect {
             subeffect = rng.random_range(0..subeffect_count);
@@ -55,7 +59,11 @@ pub fn play(manager: &mut Inner, rng: &mut rand::rngs::ThreadRng) {
                 let mut used_colors_array: [u8; 12] = [0; 12];
                 let left_or_right = rng.random_range(0..2);
 
-                let zone_order: Vec<usize> = if left_or_right == 0 { (0..4).collect() } else { (0..4).rev().collect() };
+                let zone_order: Vec<usize> = if left_or_right == 0 {
+                    (0..4).collect()
+                } else {
+                    (0..4).rev().collect()
+                };
 
                 for color in xmas_color_array {
                     for target_zone in zone_order.clone() {

@@ -4,6 +4,8 @@ mod ipc;
 mod links;
 mod pages;
 mod preview;
+mod problem_dialog;
+mod problems;
 
 use relm4::RelmApp;
 

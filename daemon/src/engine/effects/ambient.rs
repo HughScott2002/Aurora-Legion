@@ -28,7 +28,11 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
     debug_assert!((1..=60).contains(&fps));
     debug_assert!((0.0..=1.0).contains(&saturation_boost));
 
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
         // Display setup. Failure here is expected on Wayland sessions where
         // the daemon has no capture access: log once per retry and wait.
         let mut displays = match Display::all() {
@@ -36,7 +40,10 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
             Err(error) => {
                 let reason = format!("could not enumerate displays: {error}");
                 eprintln!("ambient: {reason}");
-                manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Unavailable { reason });
+                manager.report_subsystem(
+                    Subsystem::ScreenCapture,
+                    SubsystemState::Unavailable { reason },
+                );
                 sleep_before_retry(manager);
                 continue;
             }
@@ -45,7 +52,10 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
         if displays.is_empty() {
             let reason = "no displays available for capture".to_string();
             eprintln!("ambient: {reason}");
-            manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Unavailable { reason });
+            manager.report_subsystem(
+                Subsystem::ScreenCapture,
+                SubsystemState::Unavailable { reason },
+            );
             sleep_before_retry(manager);
             continue;
         }
@@ -57,7 +67,10 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
             Err(error) => {
                 let reason = format!("could not begin capture: {error}");
                 eprintln!("ambient: {reason}");
-                manager.report_subsystem(Subsystem::ScreenCapture, SubsystemState::Unavailable { reason });
+                manager.report_subsystem(
+                    Subsystem::ScreenCapture,
+                    SubsystemState::Unavailable { reason },
+                );
                 sleep_before_retry(manager);
                 continue;
             }
@@ -78,7 +91,11 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
         // a second into a queue bounded at 64.
         let mut reported_active = false;
 
-        while !manager.stop_signals.keyboard_stop_signal.load(Ordering::SeqCst) {
+        while !manager
+            .stop_signals
+            .keyboard_stop_signal
+            .load(Ordering::SeqCst)
+        {
             let now = Instant::now();
 
             match capturer.frame(seconds_per_frame) {
@@ -88,7 +105,8 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
                         reported_active = true;
                     }
 
-                    let processed = process_frame(frame, dimensions, &mut resizer, saturation_boost);
+                    let processed =
+                        process_frame(frame, dimensions, &mut resizer, saturation_boost);
 
                     match processed {
                         Some(rgb) => {
@@ -119,14 +137,23 @@ pub fn play(manager: &mut Inner, fps: u8, saturation_boost: f32) {
 fn sleep_before_retry(manager: &Inner) {
     let deadline = Instant::now() + Duration::from_millis(CAPTURE_RETRY_DELAY_MS);
     while Instant::now() < deadline {
-        if manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+        if manager
+            .stop_signals
+            .manager_stop_signal
+            .load(Ordering::SeqCst)
+        {
             return;
         }
         thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn process_frame(frame: Frame, dimensions: ScreenDimensions, resizer: &mut Resizer, saturation_boost: f32) -> Option<[u8; 12]> {
+fn process_frame(
+    frame: Frame,
+    dimensions: ScreenDimensions,
+    resizer: &mut Resizer,
+    saturation_boost: f32,
+) -> Option<[u8; 12]> {
     let Frame::PixelBuffer(buf) = frame else {
         eprintln!("ambient: got a texture frame, expected a pixel buffer");
         return None;
@@ -134,7 +161,12 @@ fn process_frame(frame: Frame, dimensions: ScreenDimensions, resizer: &mut Resiz
 
     let frame_vec = buf.data().to_vec();
 
-    let src_image = match fr::images::Image::from_vec_u8(dimensions.src.0, dimensions.src.1, frame_vec, fr::PixelType::U8x4) {
+    let src_image = match fr::images::Image::from_vec_u8(
+        dimensions.src.0,
+        dimensions.src.1,
+        frame_vec,
+        fr::PixelType::U8x4,
+    ) {
         Ok(image) => image,
         Err(error) => {
             eprintln!("ambient: could not wrap frame for resizing: {error}");
@@ -143,7 +175,8 @@ fn process_frame(frame: Frame, dimensions: ScreenDimensions, resizer: &mut Resiz
     };
 
     // Resize the whole screen down to one pixel per keyboard zone.
-    let mut dst_image = fr::images::Image::new(dimensions.dest.0, dimensions.dest.1, fr::PixelType::U8x4);
+    let mut dst_image =
+        fr::images::Image::new(dimensions.dest.0, dimensions.dest.1, fr::PixelType::U8x4);
     let resize_result = resizer.resize(&src_image, &mut dst_image, None);
     if let Err(error) = resize_result {
         eprintln!("ambient: resize failed: {error}");

@@ -1,73 +1,106 @@
 name: Bug Report
-description: Create a detailed bug report to help solve your issue.
+description: Something in Aurora does not work the way it should.
 labels:
   - bug
 body:
-  - type: textarea
-    id: steps
+  - type: markdown
     attributes:
-      label: Steps to Reproduce
-      description: Provide a clear sequence of steps to reproduce the issue.
-      placeholder: |
-        1. Open the app
-        2. Press the button
-        3. Observe the behavior
-  - type: textarea
-    id: expected_behavior
-    attributes:
-      label: Expected Behavior
-      description: Describe what you expected to happen.
-      placeholder: |
-        The program should change the lights to red.
-    validations:
-      required: true
+      value: >-
+        Run `aurora doctor` before filing. It checks this machine and often
+        names the fix outright, and its output answers most of what a bug
+        report needs to know.
+
   - type: textarea
     id: actual_behavior
     attributes:
-      label: Actual Behavior
-      description: Describe what actually happened.
+      label: What happened
+      description: What Aurora actually did.
+      placeholder: The keyboard stayed dark after I picked a colour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: What you expected
+      description: What you expected it to do instead.
+      placeholder: The four zones should have turned red.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How to get back to it, if you can.
       placeholder: |
-        The program changed the lights to green.
+        1. Open Aurora
+        2. Pick red on the Lighting page
+        3. Watch the keyboard
     validations:
-      required: true
-  - type: input
-    id: app_version
+      required: false
+
+  - type: textarea
+    id: doctor
     attributes:
-      label: App Version
-      description: This can be found in the "About" section of the GUI or by using the --version flag.
-      placeholder: v0.20.0
+      label: aurora doctor
+      description: >-
+        Output of `aurora doctor`. It carries the Aurora version, distro,
+        kernel, session, what sits on the USB bus, whether the controller
+        opens, and what the daemon reports, so none of those need typing out
+        separately. If Aurora will not run at all, say so here instead.
+      render: shell
     validations:
       required: true
-  - type: input
-    id: os_version
+
+  - type: dropdown
+    id: install_method
     attributes:
-      label: OS Version
-      description: Include your operating system type and version (e.g., Windows 11 22H2, Ubuntu 22.04, etc).
-      placeholder: Windows 11 22H2
+      label: How you installed Aurora
+      options:
+        - NixOS module
+        - AppImage
+        - Tarball
+        - Built from source
+        - Other or not sure
     validations:
       required: true
+
   - type: input
     id: laptop_model
     attributes:
-      label: Laptop Model
-      description: Include your laptop model.
-      placeholder: Legion 5 15ACH6R
+      label: Laptop model
+      description: The model and year, which nothing in the output can tell us.
+      placeholder: Legion 5 Pro 16ARH7H, 2022
     validations:
       required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon log
+      description: >-
+        Anything the daemon said around the time it went wrong. Collect it
+        with `journalctl --user -u aurora -n 100`, or run `aurora daemon` in
+        a terminal and watch it happen.
+      render: shell
+    validations:
+      required: false
+
   - type: textarea
     id: other_details
     attributes:
-      label: Additional Context
-      description: Include any other relevant information, such as screenshots or logs.
+      label: Anything else
+      description: Screenshots, a video of the keyboard, or whatever else helps.
+    validations:
+      required: false
+
   - type: checkboxes
     id: acknowledgments
     attributes:
-      label: Acknowledgments
-      description: 'Please acknowledge the following statements, when applicable:'
+      label: Before you file
       options:
-        - label: 'I have an RGB 4 zone keyboard.'
-          required: true
-        - label: 'Vantage is able to detect and control my keyboard.'
+        - label: Fn+Space cycles the keyboard's own lighting slots.
           required: false
-        - label: 'I can cycle through the keyboard profiles with FN+Space.'
+        - label: I read what `aurora doctor` said and it did not fix this.
           required: false

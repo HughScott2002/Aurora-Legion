@@ -17,7 +17,11 @@ pub fn play(manager: &mut Inner, lighting: &Lighting, mode: SwipeMode, clean_wit
 
     let steps = STEPS / lighting.speed;
 
-    while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+    while !manager
+        .stop_signals
+        .manager_stop_signal
+        .load(Ordering::SeqCst)
+    {
         match mode {
             SwipeMode::Change => {
                 match lighting.direction {
@@ -37,8 +41,10 @@ pub fn play(manager: &mut Inner, lighting: &Lighting, mode: SwipeMode, clean_wit
                 for source_zone in zone_order.clone() {
                     for target_zone in zone_order.clone() {
                         used_colors_array[target_zone * 3] = fill_rgb_array[source_zone * 3];
-                        used_colors_array[target_zone * 3 + 1] = fill_rgb_array[source_zone * 3 + 1];
-                        used_colors_array[target_zone * 3 + 2] = fill_rgb_array[source_zone * 3 + 2];
+                        used_colors_array[target_zone * 3 + 1] =
+                            fill_rgb_array[source_zone * 3 + 1];
+                        used_colors_array[target_zone * 3 + 2] =
+                            fill_rgb_array[source_zone * 3 + 2];
                         if !manager.write_transition(&used_colors_array, steps, 1) {
                             return;
                         }

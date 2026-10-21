@@ -9,9 +9,6 @@ Loading a custom effect from a file is the only way to get one, and
 nothing writes such a file. Export comes before in-app authoring. Full
 ordering: #17.
 
-- [ ] Drop the blanket `*.json` from `.gitignore` first. Both exported
-      formats are JSON, so example files would be silently ignored.
-      Hides nothing today. Issue: #12
 - [ ] Export a profile or custom effect from the GUI and the CLI.
       Issue: #17
 - [ ] Custom Effects empty state should say where a file comes from
@@ -64,10 +61,16 @@ its gaps in its own header. Full context: #28.
       change, unbounded in principle. Found while counting threads; no
       issue yet.
 
-## Diagnostics
+## Battery gauge
 
-- [ ] `aurora doctor`: enumerate the device, report whether the udev
-      rule is present and whether the ACL actually landed, socket path,
-      daemon and client versions. Subsystem states already carry half of
-      this. The ACL check is the one #20 was invisible against.
-      Issue: #3
+The maths is tested, the wiring is not. What was reviewed by reading and
+never executed: #35.
+
+- [ ] Run the app and watch the effect picker rebuild its list when the
+      daemon reports a battery. The splice blocks the selection handler;
+      if that block is wrong the keyboard jumps to position 0.
+      Issue: #35
+- [ ] No effect in the repo has a test, because they all need an engine
+      `Inner` with a real keyboard. Solve once for all of them.
+      Issue: #35
+- [ ] Watch the gauge dim against a draining battery. Issue: #35

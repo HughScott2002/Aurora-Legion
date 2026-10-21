@@ -85,7 +85,11 @@ const RECV_BUFFER_BYTES: usize = 8192;
 /// Delays between attempts to reopen the socket after a read failure that
 /// is neither an interruption nor a dropped datagram. The last entry
 /// repeats until the attempt budget runs out.
-const REOPEN_BACKOFF: [Duration; 3] = [Duration::from_millis(500), Duration::from_secs(2), Duration::from_secs(5)];
+const REOPEN_BACKOFF: [Duration; 3] = [
+    Duration::from_millis(500),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+];
 
 /// How many times to reopen the socket before giving up and reporting the
 /// subsystem unavailable. Bounded so a permanently broken socket cannot
@@ -186,7 +190,12 @@ fn run_listener(command_tx: &Sender<Command>) {
 ///   subsystem keeps running but reports degraded, because claiming Active
 ///   here would be claiming a slot number we cannot vouch for.
 /// - Anything else needs a fresh socket.
-fn listen(socket: &NetlinkSocket, family_id: u16, command_tx: &Sender<Command>, trace_enabled: bool) -> ListenOutcome {
+fn listen(
+    socket: &NetlinkSocket,
+    family_id: u16,
+    command_tx: &Sender<Command>,
+    trace_enabled: bool,
+) -> ListenOutcome {
     let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
     let mut reported_dropped_events = false;
 
@@ -341,11 +350,15 @@ fn split_messages(datagram: &[u8]) -> Vec<NetlinkMessage<'_>> {
         let Some(message_type) = read_u16_ne(datagram, offset + 4) else {
             break;
         };
-        let Some(payload) = datagram.get(offset + NLMSG_HEADER_BYTES..offset + message_bytes) else {
+        let Some(payload) = datagram.get(offset + NLMSG_HEADER_BYTES..offset + message_bytes)
+        else {
             break;
         };
 
-        messages.push(NetlinkMessage { message_type, payload });
+        messages.push(NetlinkMessage {
+            message_type,
+            payload,
+        });
 
         offset += align4(message_bytes);
         if offset >= datagram.len() {
@@ -415,7 +428,8 @@ fn parse_family_reply(datagram: &[u8]) -> Option<AcpiFamily> {
                     let mut candidate_id: Option<u32> = None;
                     for (group_attr_type, group_attr_payload) in walk_attributes(group_payload) {
                         if group_attr_type == CTRL_ATTR_MCAST_GRP_NAME {
-                            name_matches = nul_terminated_matches(group_attr_payload, ACPI_MCAST_GROUP_NAME);
+                            name_matches =
+                                nul_terminated_matches(group_attr_payload, ACPI_MCAST_GROUP_NAME);
                         }
                         if group_attr_type == CTRL_ATTR_MCAST_GRP_ID {
                             candidate_id = read_u32_ne(group_attr_payload, 0);
@@ -429,7 +443,10 @@ fn parse_family_reply(datagram: &[u8]) -> Option<AcpiFamily> {
         }
 
         if let (Some(family_id), Some(multicast_group_id)) = (family_id, multicast_group_id) {
-            return Some(AcpiFamily { family_id, multicast_group_id });
+            return Some(AcpiFamily {
+                family_id,
+                multicast_group_id,
+            });
         }
     }
 
@@ -474,7 +491,9 @@ fn parse_acpi_events(datagram: &[u8], family_id: u16) -> Vec<AcpiEvent<'_>> {
             let Some(device_class) = attr_payload.get(..DEVICE_CLASS_BYTES) else {
                 continue;
             };
-            let Some(bus_id) = attr_payload.get(DEVICE_CLASS_BYTES..DEVICE_CLASS_BYTES + BUS_ID_BYTES) else {
+            let Some(bus_id) =
+                attr_payload.get(DEVICE_CLASS_BYTES..DEVICE_CLASS_BYTES + BUS_ID_BYTES)
+            else {
                 continue;
             };
             let Some(event_type) = read_u32_ne(attr_payload, EVENT_TYPE_OFFSET) else {
@@ -566,9 +585,18 @@ impl NetlinkSocket {
     fn open_generic() -> Result<Self, String> {
         // SAFETY: plain socket(2) call; the fd is owned by the returned
         // struct and closed in Drop.
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, libc::NETLINK_GENERIC) };
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_NETLINK,
+                libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+                libc::NETLINK_GENERIC,
+            )
+        };
         if fd < 0 {
-            return Err(format!("could not open netlink socket: {}", io::Error::last_os_error()));
+            return Err(format!(
+                "could not open netlink socket: {}",
+                io::Error::last_os_error()
+            ));
         }
         Ok(Self { fd })
     }
@@ -588,7 +616,10 @@ impl NetlinkSocket {
             )
         };
         if bind_result < 0 {
-            return Err(format!("could not bind netlink socket: {}", io::Error::last_os_error()));
+            return Err(format!(
+                "could not bind netlink socket: {}",
+                io::Error::last_os_error()
+            ));
         }
         Ok(())
     }
@@ -613,7 +644,10 @@ impl NetlinkSocket {
             )
         };
         if sent < 0 {
-            return Err(format!("could not send netlink request: {}", io::Error::last_os_error()));
+            return Err(format!(
+                "could not send netlink request: {}",
+                io::Error::last_os_error()
+            ));
         }
         Ok(())
     }
@@ -643,7 +677,10 @@ impl NetlinkSocket {
             )
         };
         if result < 0 {
-            return Err(format!("could not join the acpi event group: {}", io::Error::last_os_error()));
+            return Err(format!(
+                "could not join the acpi event group: {}",
+                io::Error::last_os_error()
+            ));
         }
         Ok(())
     }
@@ -710,7 +747,8 @@ mod tests {
     fn sample_acpi_event(device_class: &str, bus_id: &str, event_type: u32) -> Vec<u8> {
         let mut event = vec![0u8; DEVICE_CLASS_BYTES + BUS_ID_BYTES + 1 + 8];
         event[..device_class.len()].copy_from_slice(device_class.as_bytes());
-        event[DEVICE_CLASS_BYTES..DEVICE_CLASS_BYTES + bus_id.len()].copy_from_slice(bus_id.as_bytes());
+        event[DEVICE_CLASS_BYTES..DEVICE_CLASS_BYTES + bus_id.len()]
+            .copy_from_slice(bus_id.as_bytes());
         event[EVENT_TYPE_OFFSET..EVENT_TYPE_OFFSET + 4].copy_from_slice(&event_type.to_ne_bytes());
         event
     }
@@ -733,7 +771,11 @@ mod tests {
     #[test]
     fn family_reply_parses_id_and_group() {
         let mut group_entry: Vec<u8> = Vec::new();
-        push_attribute(&mut group_entry, CTRL_ATTR_MCAST_GRP_NAME, b"acpi_mc_group\0");
+        push_attribute(
+            &mut group_entry,
+            CTRL_ATTR_MCAST_GRP_NAME,
+            b"acpi_mc_group\0",
+        );
         let mut group_id_payload: Vec<u8> = Vec::new();
         push_u32(&mut group_id_payload, 9);
         push_attribute(&mut group_entry, CTRL_ATTR_MCAST_GRP_ID, &group_id_payload);
@@ -769,13 +811,21 @@ mod tests {
     fn light_profile_event_is_recognized_in_both_encodings() {
         // Raw notify ID, as a 2023 Pro reports it (bus instance :02 there).
         let mut raw_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut raw_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE6));
+        push_attribute(
+            &mut raw_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "PNP0C14:02", 0xE6),
+        );
         let raw_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &raw_attrs);
         assert!(datagram_matches(&raw_datagram, 24));
 
         // Packed form, as maniac103's 2021 trace reports it.
         let mut packed_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut packed_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE600));
+        push_attribute(
+            &mut packed_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "PNP0C14:01", 0xE600),
+        );
         let packed_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &packed_attrs);
         assert!(datagram_matches(&packed_datagram, 24));
     }
@@ -784,31 +834,51 @@ mod tests {
     fn other_events_are_ignored() {
         // Wrong device class.
         let mut battery_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut battery_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("battery", "PNP0C0A:00", 0xE6));
+        push_attribute(
+            &mut battery_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("battery", "PNP0C0A:00", 0xE6),
+        );
         let battery_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &battery_attrs);
         assert!(!datagram_matches(&battery_datagram, 24));
 
         // Wrong bus id (a WMI event from some other mapper device).
         let mut other_wmi_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut other_wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "OTHER123:00", 0xE6));
+        push_attribute(
+            &mut other_wmi_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "OTHER123:00", 0xE6),
+        );
         let other_wmi_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &other_wmi_attrs);
         assert!(!datagram_matches(&other_wmi_datagram, 24));
 
         // Wrong event type: the 0xE8 event that accompanies every press,
         // and the thermal-mode hotkey.
         let mut companion_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut companion_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:02", 0xE8));
+        push_attribute(
+            &mut companion_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "PNP0C14:02", 0xE8),
+        );
         let companion_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &companion_attrs);
         assert!(!datagram_matches(&companion_datagram, 24));
 
         let mut thermal_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut thermal_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xD000));
+        push_attribute(
+            &mut thermal_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "PNP0C14:01", 0xD000),
+        );
         let thermal_datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &thermal_attrs);
         assert!(!datagram_matches(&thermal_datagram, 24));
 
         // Wrong family id entirely.
         let mut wmi_attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut wmi_attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE6));
+        push_attribute(
+            &mut wmi_attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "PNP0C14:01", 0xE6),
+        );
         let wrong_family_datagram = wrap_in_message(30, ACPI_GENL_CMD_EVENT, &wmi_attrs);
         assert!(!datagram_matches(&wrong_family_datagram, 24));
     }
@@ -816,7 +886,11 @@ mod tests {
     #[test]
     fn truncated_datagrams_do_not_panic() {
         let mut attrs: Vec<u8> = Vec::new();
-        push_attribute(&mut attrs, ACPI_GENL_ATTR_EVENT, &sample_acpi_event("wmi", "PNP0C14:01", 0xE6));
+        push_attribute(
+            &mut attrs,
+            ACPI_GENL_ATTR_EVENT,
+            &sample_acpi_event("wmi", "PNP0C14:01", 0xE6),
+        );
         let datagram = wrap_in_message(24, ACPI_GENL_CMD_EVENT, &attrs);
 
         for cut in 0..datagram.len() {

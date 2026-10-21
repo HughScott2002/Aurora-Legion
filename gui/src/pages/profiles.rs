@@ -4,8 +4,7 @@
 use aurora_protocol::ipc::{ProfileSummary, SubsystemState};
 use relm4::{
     adw::{self, prelude::*},
-    gtk,
-    ComponentSender,
+    gtk, ComponentSender,
 };
 
 use crate::app::{App, AppMsg};
@@ -104,7 +103,13 @@ impl ProfilesPage {
     }
 
     /// Rebuild the list when the set of saved profiles changed.
-    pub fn sync(&mut self, profiles: &[ProfileSummary], current_name: Option<&str>, hotkey: &SubsystemState, sender: &ComponentSender<App>) {
+    pub fn sync(
+        &mut self,
+        profiles: &[ProfileSummary],
+        current_name: Option<&str>,
+        hotkey: &SubsystemState,
+        sender: &ComponentSender<App>,
+    ) {
         self.sync_description(hotkey);
 
         let mut names: Vec<String> = Vec::with_capacity(profiles.len());
@@ -131,7 +136,9 @@ impl ProfilesPage {
             let apply_sender = sender.clone();
             let apply_name = name.clone();
             row.connect_activated(move |_| {
-                apply_sender.input(AppMsg::ProfileActivated { name: apply_name.clone() });
+                apply_sender.input(AppMsg::ProfileActivated {
+                    name: apply_name.clone(),
+                });
             });
 
             let delete_button = gtk::Button::from_icon_name("user-trash-symbolic");
@@ -141,7 +148,9 @@ impl ProfilesPage {
             let delete_sender = sender.clone();
             let delete_name = name.clone();
             delete_button.connect_clicked(move |_| {
-                delete_sender.input(AppMsg::ProfileDeleted { name: delete_name.clone() });
+                delete_sender.input(AppMsg::ProfileDeleted {
+                    name: delete_name.clone(),
+                });
             });
             row.add_suffix(&delete_button);
 

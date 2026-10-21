@@ -12,7 +12,9 @@ use hidapi::HidApi;
 use std::time::{Duration, Instant};
 
 const VENDOR_ID: u16 = 0x048d;
-const PRODUCT_IDS: [u16; 11] = [0xc995, 0xc994, 0xc993, 0xc985, 0xc984, 0xc983, 0xc975, 0xc973, 0xc965, 0xc963, 0xc955];
+const PRODUCT_IDS: [u16; 11] = [
+    0xc995, 0xc994, 0xc993, 0xc985, 0xc984, 0xc983, 0xc975, 0xc973, 0xc965, 0xc963, 0xc955,
+];
 
 const POLL_INTERVAL_MS: u64 = 50;
 
@@ -44,14 +46,20 @@ fn poll_for(device: &hidapi::HidDevice, seconds: u64, label: &str) {
 }
 
 fn main() {
-    let mode = std::env::args().nth(1).unwrap_or_else(|| "poll".to_string());
+    let mode = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "poll".to_string());
 
     let api = HidApi::new().expect("hidapi init failed");
     let info = api
         .device_list()
-        .find(|device| device.vendor_id() == VENDOR_ID && PRODUCT_IDS.contains(&device.product_id()))
+        .find(|device| {
+            device.vendor_id() == VENDOR_ID && PRODUCT_IDS.contains(&device.product_id())
+        })
         .expect("no supported keyboard found");
-    let device = info.open_device(&api).expect("could not open the keyboard (daemon still running?)");
+    let device = info
+        .open_device(&api)
+        .expect("could not open the keyboard (daemon still running?)");
 
     match mode.as_str() {
         "poll" => {

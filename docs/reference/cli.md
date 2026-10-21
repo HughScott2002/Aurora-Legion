@@ -9,8 +9,9 @@
 | --- | --- |
 | `aurora daemon` | Run the daemon in the foreground. |
 | `aurora set` | Build and apply lighting from command-line options. |
-| `aurora list` | List the 13 built-in effects. |
+| `aurora list` | List the built-in effects this machine can run. |
 | `aurora status` | Show daemon, keyboard, profile and Fn+Space slot state. |
+| `aurora doctor` | Check this machine for anything stopping Aurora working. |
 | `aurora cycle-profile` | Apply the next profile saved through the GUI. |
 | `aurora slot` | Show or change the active Fn+Space slot. |
 | `aurora load-profile` | Load and apply a profile JSON file. |
@@ -81,15 +82,46 @@ aurora cycle-profile
 Applies the next saved profile, wrapping at the end. If the current
 lighting was never saved, it starts from the first saved profile.
 
-This is meant to be bound to a keyboard shortcut. Aurora does not grab
-keys itself, because a daemon that watches the keyboard has to poll and
-only sees the keys its display server hands it. The desktop already
-does this properly, so bind it there:
+This can be bound to a desktop keyboard shortcut. Aurora also polls for
+Meta+Right Alt, but detection depends on the session. A desktop binding
+avoids that limitation:
 
 Settings, Keyboard, View and Customize Shortcuts, Custom Shortcuts, and
 add `aurora cycle-profile` with whatever key you want. The binding works
 on Wayland and X11 alike, and survives Aurora being restarted or
 upgraded.
+
+## `doctor`
+
+```text
+aurora doctor [--json]
+```
+
+Checks this machine for anything stopping Aurora working: the version and
+distro, what sits on the USB bus, whether the controller opens, the udev
+rule, the daemon, the systemd unit, and the battery. Each check prints one
+line marked `ok`, `warn`, `fail` or `?`, and a failing check says what to
+do about it.
+
+| Option | Effect |
+| --- | --- |
+| `--json` | Print the report as JSON instead of text. |
+
+The exit status is 0 when nothing failed and 1 when something did, so a
+script can branch on it. Warnings do not fail the command: a machine with
+no battery is not broken, it just cannot use the battery features.
+
+Colour is added only for an interactive terminal. It is dropped when the
+output is piped, when `NO_COLOR` is set to anything non-empty, and when
+`TERM` is `dumb`.
+
+The JSON is an object with `aurora`, `problems` and `checks`. Each check
+has `name`, `health` (`ok`, `warn`, `fail` or `unknown`), `summary`,
+`detail` and `fix`.
+
+The text output is what to paste into a bug report. It names the distro,
+kernel, session, what is on the USB bus, whether the controller opens,
+and what the daemon says about the keyboard.
 
 ## Effects
 
@@ -107,10 +139,19 @@ Christmas
 Fade
 Temperature
 Ripple
+Battery
 ```
 
 `Static`, `Breath`, `Smooth` and `Wave` run on the keyboard. See
 [Effects](../protocol.md#effects) for parameters and color behavior.
+
+`Battery` needs a battery. On a machine without one the daemon refuses
+it, and `aurora list` leaves it out.
+
+To use it, choose Battery on the Lighting page or run
+`aurora set -e Battery -c 255,0,0,0,255,0,0,0,255,255,255,255`.
+Enable Low Battery Alert separately in Settings if you want red lighting
+while discharging at 15% or less.
 
 ## File commands
 
@@ -127,6 +168,9 @@ Play a custom effect:
 $ aurora custom-effect --path pulse.json
 custom effect playing
 ```
+
+While Low Battery Alert is showing red, the daemon rejects custom
+effect playback. Turn off Low Battery Alert in Settings to play one.
 
 `set --save FILE` writes a profile file before applying it. It does not
 add the profile to the daemon's named profile list. Save named profiles
@@ -153,7 +197,7 @@ Inspect the daemon:
 
 ```console
 $ aurora status
-daemon:   running (v0.24.1)
+daemon:   running (v0.25.0)
 keyboard: connected
 profile:  (unsaved)
 slot:     1 of 3 (Static effect)

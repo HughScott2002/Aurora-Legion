@@ -5,12 +5,20 @@ client. It is enough to implement a client without reading Rust. The
 types live in [`protocol/src/ipc.rs`](../protocol/src/ipc.rs). If code
 and this page disagree, this page is wrong.
 
-Protocol version: **2** (`PROTOCOL_VERSION` in the protocol crate).
+Protocol version: **3** (`PROTOCOL_VERSION` in the protocol crate).
 
 Version 2 moved the lighting configuration out of `Profile` and into
 `Profile.slots`, one entry per Fn+Space slot. A version 1 client would
 misread every profile it received, so this is a breaking change and both
 reference clients stop on a mismatch.
+
+Version 3 added the battery features. `DaemonState` gained
+`battery_available`, `battery_alert`, `battery_alert_active` and
+`battery_percent`, all required, so a version 3 client cannot parse the
+state a version 2 daemon sends. That is what makes the change breaking
+rather than additive. `Effects` also gained `Battery`, which a version 2
+daemon cannot run, and `KeyboardStatus` gained `Lost`, which a version 2
+client would fail to parse.
 
 ## Transport
 
@@ -80,8 +88,8 @@ Two version numbers exist:
 Handshake: send `Hello` first on every new connection.
 
 ```json
-{"id": 1, "req": {"type": "Hello", "protocol_version": 2}}
-{"id": 1, "resp": {"type": "Hello", "protocol_version": 2, "daemon_version": "0.24.1"}}
+{"id": 1, "req": {"type": "Hello", "protocol_version": 3}}
+{"id": 1, "resp": {"type": "Hello", "protocol_version": 3, "daemon_version": "0.25.0"}}
 ```
 
 - The daemon always answers `Hello` with its own versions, even on
@@ -116,6 +124,7 @@ Requests are objects tagged by `"type"`; parameters are sibling fields.
 | `CycleProfile` | none | `Ok` | Advance to the next saved profile, wrapping around. |
 | `AddCustomEffect` | `effect` | `Ok` | Save a named custom effect; overwrites one with the same name. Name required and non-empty. |
 | `DeleteCustomEffect` | `name` | `Ok` | Delete the saved custom effect called `name`. |
+| `SetBatteryAlert` | `enabled` | `Ok` | Turn the low-battery alert on or off. Accepted and stored on a machine with no battery, where it never fires. |
 | `Subscribe` | none | `Ok` | Push a `StateChanged` event on this connection whenever daemon state changes. |
 | `Shutdown` | none | `Ok` | Ask the daemon to exit cleanly. The `Ok` is queued before exit, but clients should tolerate the connection closing without it. |
 
@@ -188,17 +197,21 @@ Subscription semantics:
   "custom_effect_playing": "pulse",
   "profiles": [{"name": "gaming"}],
   "custom_effects": [{"name": "pulse", "step_count": 12, "should_loop": true}],
-  "version": "0.24.1",
+  "version": "0.25.0",
   "settings_error": null,
   "slot_sync": {"type": "Active"},
   "hotkey": {"type": "Unavailable", "reason": "no display connection"},
-  "screen_capture": {"type": "Inactive"}
+  "screen_capture": {"type": "Inactive"},
+  "battery_available": true,
+  "battery_alert": true,
+  "battery_alert_active": false,
+  "battery_percent": 53
 }
 ```
 
 - `current` is the live profile, all three slots. The keyboard shows
   `current.slots[active_slot]` unless a custom effect is playing or
-  `active_slot` is `"Off"`.
+  `active_slot` is `"Off"`, or the low-battery alert is active.
 - `active_slot` is a `SlotSelection`. See below.
 - `custom_effect_playing` is the playing custom effect's display name,
   or `null` when none plays.
@@ -211,6 +224,29 @@ Subscription semantics:
   reported rather than fatal.
 - `slot_sync`, `hotkey` and `screen_capture` are `SubsystemState`
   values. See below.
+- `battery_available` says whether this machine has a battery at all. It
+  is decided once at daemon startup and fixed for the life of the
+  process. Clients hide the low-battery alert setting when it is false:
+  there is nothing to configure and nothing the user could act on.
+- `battery_alert` says whether the low-battery alert may take the
+  keyboard. When enabled, it turns lit slots red while discharging at
+  15% charge or less. Charging or disabling the alert restores the
+  selected slot's lighting.
+- `battery_alert_active` says whether the alert is taking the keyboard
+  right now. It is false while `active_slot` is `"Off"`, however low the
+  battery, because there is nothing lit to turn red. While it is true the
+  keyboard shows red instead of the active slot's lighting, and `current`
+  still reports the lighting the user chose. The alert is not a profile
+  and is never saved into one, so a client that draws the keyboard must
+  consult this field or it will claim a look the hardware is not
+  showing. While it is true, `PlayCustomEffect` and
+  `PlayCustomEffectByName` return `InvalidRequest`. Disable the alert
+  with `SetBatteryAlert` before starting a custom effect.
+- `battery_percent` is the charge last read, 0 to 100, or `null` on a
+  machine with no battery and before the first read. It is here so a
+  client drawing the keyboard can draw the `Battery` effect's gauge; the
+  daemon reads the charge itself and does not need this field. Sampled
+  every few seconds, so it is recent rather than instantaneous.
 
 At most 128 profiles and 128 custom effects are stored
 (`MAX_SAVED_PROFILES`, `MAX_SAVED_CUSTOM_EFFECTS`).
@@ -226,7 +262,8 @@ out-of-range slot cannot be represented, let alone sent.
 After the daemon acquires the keyboard this is Aurora's own number, not
 a live controller reading. Aurora's own lighting writes move the
 controller's counter without raising the Fn+Space event, so the counter
-is trusted exactly once, at acquisition. See
+is trusted only at the first acquisition in a daemon session. After a
+USB disconnect, reacquisition preserves Aurora's current selection. See
 [Fn+Space synchronization](explanation/fn-space-sync.md).
 
 ### SubsystemState
@@ -259,7 +296,15 @@ Tagged by `"type"`:
 | `Connected` | none | Keyboard acquired; effects are applied. |
 | `Searching` | none | No keyboard found yet; the daemon retries with backoff. |
 | `PermissionDenied` | `message` | Keyboard present but not openable (udev rule missing). |
+| `Lost` | none | Worked this session, then stopped answering and stayed off the bus. |
 | `Error` | `message` | Any other device failure. |
+
+`Searching` and `Lost` both mean the bus holds no supported keyboard. They
+differ in what a client should say: `Searching` is a keyboard that has not
+turned up yet and may at any moment, `Lost` is one the kernel can no longer
+enumerate, where restarting the daemon changes nothing and a reboot is the
+usual fix. The daemon waits out a short grace period before reporting
+`Lost`, so a suspend and resume reads as `Searching` throughout.
 
 ### Profile
 
@@ -340,12 +385,23 @@ objects (externally tagged):
 | `Fade` | none | yes | no | yes |
 | `Temperature` | none | no | no | no |
 | `Ripple` | none | yes | no | yes |
+| `Battery` | none | yes | no | no |
 
 `mode` is `"Change"` or `"Fill"`.
 
 `Static`, `Breath`, `Smooth` and `Wave` run on the keyboard hardware;
 everything else is driven by the daemon. This does not affect the
 protocol, but hardware effects survive a daemon stop.
+
+`Battery` turns the keyboard into a charge gauge. It picks no colours of
+its own: it takes the slot's four zone colours and dims them from the
+right as the battery drains, one zone per 25 percentage points, with the
+zone on the charge line dimmed to the fraction of it that is left. The
+daemon rejects it with `InvalidRequest` on a machine where
+`battery_available` is false, whether it arrives in a `SetLighting`, a
+`SetProfile` or an `AddProfile`, so a profile file written on a laptop
+does not start a gauge on a desktop. Clients should leave it out of an
+effect picker when `battery_available` is false.
 
 ### CustomEffect
 
@@ -389,8 +445,8 @@ protocol, but hardware effects survive a daemon stop.
 ## Example session
 
 ```text
-C: {"id":1,"req":{"type":"Hello","protocol_version":2}}
-S: {"id":1,"resp":{"type":"Hello","protocol_version":2,"daemon_version":"0.24.1"}}
+C: {"id":1,"req":{"type":"Hello","protocol_version":3}}
+S: {"id":1,"resp":{"type":"Hello","protocol_version":3,"daemon_version":"0.25.0"}}
 C: {"id":2,"req":{"type":"Subscribe"}}
 S: {"id":2,"resp":{"type":"Ok"}}
 C: {"id":3,"req":{"type":"GetState"}}

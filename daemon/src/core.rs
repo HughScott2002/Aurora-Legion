@@ -5,6 +5,7 @@
 //! broadcasts them.
 
 use std::{
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -14,15 +15,18 @@ use std::{
 
 use aurora_protocol::{
     custom_effect::CustomEffect,
+    effects::{Brightness, Effects},
     ipc::{
-        CustomEffectSummary, DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus, ProfileSummary, Request, Response, ResponseEnvelope,
-        SlotSelection, Subsystem, SubsystemState, MAX_CUSTOM_EFFECT_STEPS, MAX_SAVED_CUSTOM_EFFECTS, MAX_SAVED_PROFILES,
+        CustomEffectSummary, DaemonState, ErrorKind, Event, EventEnvelope, KeyboardStatus,
+        ProfileSummary, Request, Response, ResponseEnvelope, SlotSelection, Subsystem,
+        SubsystemState, MAX_CUSTOM_EFFECT_STEPS, MAX_SAVED_CUSTOM_EFFECTS, MAX_SAVED_PROFILES,
     },
     profile::{Lighting, Profile, MAX_NAME_BYTES},
 };
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::{
+    battery,
     engine::{EffectManager, StopSignals, SOFTWARE_SPEED_RANGE},
     keyboard::{self, AcquireOutcome},
     settings::Settings,
@@ -53,6 +57,22 @@ const SLOT_SETTLE_DELAY: Duration = Duration::from_millis(250);
 /// cannot change behavior.
 const SLOT_TRACE_DELAY: Duration = Duration::from_millis(500);
 
+/// Charge at or below which the keyboard turns red, while the battery is
+/// discharging. Above this, or on AC, lighting is whatever the user chose.
+const BATTERY_ALERT_PERCENT: u8 = 15;
+
+/// How often the battery is read. This is a deadline checked on the core
+/// tick, not a wakeup of its own: `TICK_IDLE_MS` is shorter, so the read
+/// always lands within one idle tick of falling due and costs nothing on
+/// top of a loop that was already turning. A four-byte sysfs read does not
+/// justify a udev netlink listener of the kind `slot_watch` needs.
+const BATTERY_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// What the keyboard shows while the battery is low: red at the hardware's
+/// low brightness, so the alert looks the same whatever brightness the
+/// user's own lighting was using.
+const BATTERY_ALERT_COLOR: [u8; 3] = [255, 0, 0];
+
 /// Commands the core accepts. Keep this the only way to mutate daemon state.
 pub enum Command {
     Ipc {
@@ -64,13 +84,23 @@ pub enum Command {
     /// The Fn+Space "light profile change" event fired; sent by the slot
     /// watcher thread. The core advances its slot once per event.
     HardwareSlotEvent,
+    /// A kernel USB removal, including while the effect engine is idle.
+    KeyboardRemoved {
+        device_name: String,
+    },
+    /// A dropped notification means the current handle can no longer be trusted.
+    UsbEventsLost,
+    KeyboardReleased,
     /// SIGTERM/SIGINT arrived; sent by the signal listener thread so the
     /// core wakes immediately instead of on its next tick.
     ShutdownSignal,
     /// An optional subsystem changed state. Sent by the adapter that owns
     /// it, so "Fn+Space does not work here" becomes protocol-visible
     /// instead of a log line nobody reads.
-    SubsystemStatus { subsystem: Subsystem, state: SubsystemState },
+    SubsystemStatus {
+        subsystem: Subsystem,
+        state: SubsystemState,
+    },
 }
 
 /// A line queued for one client connection; the connection's writer thread
@@ -93,6 +123,15 @@ pub struct Core {
     active_slot: SlotSelection,
     custom_effect_playing: Option<String>,
     keyboard_status: KeyboardStatus,
+    /// When the keyboard stopped answering, if it has this session. Cleared
+    /// on acquisition. This is what separates a controller that went away
+    /// from one that was never here: both leave the bus empty, but only the
+    /// first has a user watching for it to come back.
+    keyboard_lost_at: Option<Instant>,
+    /// The USB port behind the open handle, not another supported keyboard.
+    keyboard_device_name: Option<String>,
+    /// Cleanup runs off-core; reopening waits until it releases the old handle.
+    keyboard_releasing: bool,
 
     engine: Option<EffectManager>,
     stop_signals: StopSignals,
@@ -120,10 +159,32 @@ pub struct Core {
     hotkey: SubsystemState,
     screen_capture: SubsystemState,
 
+    /// The battery directory found at startup, or `None` on a machine
+    /// without one. Decided once: batteries do not appear at runtime, and
+    /// a desktop must never pay for a read.
+    battery_dir: Option<PathBuf>,
+    /// Whether the battery is low enough for the alert to want the
+    /// keyboard. Whether it actually gets it also depends on the backlight
+    /// being on; see [`Core::battery_alert_is_showing`]. Never persisted:
+    /// this is a fact about the battery, not a setting.
+    battery_alert_active: bool,
+    /// The charge last read, or `None` before the first read and on a
+    /// machine without a battery. Reported to clients so the app can draw
+    /// the Battery effect's gauge; the effect itself reads sysfs directly
+    /// on the engine thread and does not use this.
+    battery_percent: Option<u8>,
+    /// When the battery is next due to be read.
+    battery_read_at: Instant,
+
     shutdown_requested: bool,
 }
 
-pub fn run(command_tx: &Sender<Command>, command_rx: &Receiver<Command>, shutdown_flag: &Arc<AtomicBool>) {
+pub fn run(
+    command_tx: &Sender<Command>,
+    command_rx: &Receiver<Command>,
+    shutdown_flag: &Arc<AtomicBool>,
+    battery_dir: Option<PathBuf>,
+) {
     let settings = Settings::load_or_migrate();
     let current_profile = settings.current_profile.clone();
     let active_slot = settings.active_slot;
@@ -135,6 +196,9 @@ pub fn run(command_tx: &Sender<Command>, command_rx: &Receiver<Command>, shutdow
         active_slot,
         custom_effect_playing: None,
         keyboard_status: KeyboardStatus::Searching,
+        keyboard_lost_at: None,
+        keyboard_device_name: None,
+        keyboard_releasing: false,
         engine: None,
         stop_signals: StopSignals::new(),
         slot_apply_at: None,
@@ -149,6 +213,12 @@ pub fn run(command_tx: &Sender<Command>, command_rx: &Receiver<Command>, shutdow
         slot_sync: SubsystemState::Unknown,
         hotkey: SubsystemState::Unknown,
         screen_capture: SubsystemState::Inactive,
+        battery_dir,
+        battery_alert_active: false,
+        battery_percent: None,
+        // Read on the first tick rather than after one interval, so a
+        // daemon started on a nearly flat battery warns immediately.
+        battery_read_at: Instant::now(),
         shutdown_requested: false,
     };
 
@@ -168,6 +238,7 @@ pub fn run(command_tx: &Sender<Command>, command_rx: &Receiver<Command>, shutdow
 
         core.apply_slot_if_due();
         core.trace_slot_counter_if_due();
+        core.read_battery_if_due();
         core.save_settings_if_due();
     }
 
@@ -187,26 +258,38 @@ impl Core {
             return;
         }
 
+        self.release_keyboard();
+    }
+
+    fn release_keyboard(&mut self) {
         eprintln!("core: keyboard lost, re-entering acquisition");
+        // A driver call or effect may still be unwinding. Keep serving IPC
+        // while cleanup waits, and allow only one retiring engine at a time.
+        let slot_reader = self.slot_reader.take();
         if let Some(engine) = self.engine.take() {
-            engine.shutdown();
+            self.keyboard_releasing = true;
+            let command_tx = self.command_tx.clone();
+            std::thread::spawn(move || {
+                // The last shared HID handle must also close off-core.
+                drop(slot_reader);
+                engine.shutdown();
+                let _ = command_tx.send(Command::KeyboardReleased);
+            });
         }
 
         self.stop_signals = StopSignals::new();
+        self.keyboard_device_name = None;
         self.slot_apply_at = None;
-        self.slot_reader = None;
         self.slot_trace_at = None;
         self.keyboard_status = KeyboardStatus::Searching;
+        self.keyboard_lost_at = Some(Instant::now());
         self.acquire_attempt_count = 0;
         self.next_acquire_at = Instant::now();
         self.broadcast_state();
     }
 
     fn try_acquire_keyboard_if_due(&mut self) {
-        if self.engine.is_some() {
-            return;
-        }
-        if Instant::now() < self.next_acquire_at {
+        if !self.keyboard_acquisition_is_due() {
             return;
         }
 
@@ -221,15 +304,29 @@ impl Core {
                 // first lighting report.
                 let slot_reader = keyboard.slot_reader();
                 let counter_result = slot_reader.read_slot_counter();
-                self.active_slot = anchor_slot(self.active_slot, counter_result);
+                self.active_slot = anchor_slot(
+                    self.active_slot,
+                    counter_result,
+                    self.keyboard_lost_at.is_some(),
+                );
+                self.keyboard_device_name = keyboard.usb_device_name().map(str::to_string);
 
-                let engine = EffectManager::new(*keyboard, self.stop_signals.clone(), Some(self.command_tx.clone()));
+                let engine = EffectManager::new(
+                    *keyboard,
+                    self.stop_signals.clone(),
+                    Some(self.command_tx.clone()),
+                    self.battery_dir.clone(),
+                );
                 self.engine = Some(engine);
                 self.slot_reader = Some(slot_reader);
                 self.keyboard_status = KeyboardStatus::Connected;
+                self.keyboard_lost_at = None;
                 self.apply_active_slot("keyboard acquired");
             }
             AcquireOutcome::Failed(status) => {
+                let lost_for = self.keyboard_lost_at.map(|lost_at| lost_at.elapsed());
+                let status = keyboard::status_after_loss(status, lost_for);
+
                 // Only broadcast on transitions so a missing keyboard does
                 // not spam subscribers every ten seconds.
                 if status != self.keyboard_status {
@@ -241,13 +338,24 @@ impl Core {
         }
     }
 
+    fn keyboard_acquisition_is_due(&self) -> bool {
+        self.engine.is_none() && !self.keyboard_releasing && Instant::now() >= self.next_acquire_at
+    }
+
     // --- Command handling ------------------------------------------------
 
     fn handle_command(&mut self, command: Command) {
         match command {
-            Command::Ipc { envelope_id, request, out_tx } => {
+            Command::Ipc {
+                envelope_id,
+                request,
+                out_tx,
+            } => {
                 let response = self.handle_request(request, &out_tx);
-                let envelope = ResponseEnvelope { id: envelope_id, resp: response };
+                let envelope = ResponseEnvelope {
+                    id: envelope_id,
+                    resp: response,
+                };
                 let send_result = out_tx.send(Outbound::Response(envelope));
                 if send_result.is_err() {
                     // Client vanished between request and response; harmless.
@@ -262,6 +370,19 @@ impl Core {
             Command::HardwareSlotEvent => {
                 self.advance_slot();
             }
+            Command::KeyboardRemoved { device_name } => {
+                if self.keyboard_device_name.as_deref() == Some(device_name.as_str()) {
+                    eprintln!("core: USB controller {device_name} removed");
+                    self.release_keyboard();
+                }
+            }
+            Command::UsbEventsLost => {
+                if self.keyboard_device_name.is_some() {
+                    eprintln!("core: USB notifications lost, reopening the controller");
+                    self.release_keyboard();
+                }
+            }
+            Command::KeyboardReleased => self.keyboard_releasing = false,
             Command::ShutdownSignal => {
                 self.shutdown_requested = true;
             }
@@ -330,7 +451,9 @@ impl Core {
                     daemon_version: env!("CARGO_PKG_VERSION").to_string(),
                 }
             }
-            Request::GetState => Response::State { state: self.state_snapshot() },
+            Request::GetState => Response::State {
+                state: self.state_snapshot(),
+            },
             Request::Subscribe => {
                 self.subscribers.push(out_tx.clone());
                 Response::Ok
@@ -347,6 +470,7 @@ impl Core {
             Request::CycleProfile => self.cycle_profile(),
             Request::AddCustomEffect { effect } => self.add_custom_effect(effect),
             Request::DeleteCustomEffect { name } => self.delete_custom_effect(&name),
+            Request::SetBatteryAlert { enabled } => self.set_battery_alert(enabled),
             Request::Shutdown => {
                 self.shutdown_requested = true;
                 Response::Ok
@@ -364,12 +488,7 @@ impl Core {
         self.custom_effect_playing = None;
         self.slot_apply_at = None;
 
-        let lighting = match self.active_slot.index() {
-            Some(slot_index) => self.current_profile.slots[slot_index].clone(),
-            // Off holds no lighting: write darkness rather than nothing, so
-            // the keyboard matches what Aurora reports.
-            None => Lighting::default(),
-        };
+        let lighting = self.lighting_to_show();
 
         eprintln!("core: applying slot {} ({reason})", self.active_slot);
         if let Some(engine) = &self.engine {
@@ -378,6 +497,104 @@ impl Core {
 
         self.schedule_slot_trace();
         self.broadcast_state();
+    }
+
+    /// What the keyboard should be showing: the low-battery alert while it
+    /// holds, otherwise the live slot's own lighting.
+    ///
+    /// The alert lives here and nowhere else. `current_profile` is never
+    /// touched by it, and the settings file is written from
+    /// `current_profile`, so alert lighting cannot reach disk by
+    /// construction rather than by anyone remembering to avoid it.
+    fn lighting_to_show(&self) -> Lighting {
+        let slot_lighting = match self.active_slot.index() {
+            Some(slot_index) => self.current_profile.slots[slot_index].clone(),
+            // Off holds no lighting: write darkness rather than nothing, so
+            // the keyboard matches what Aurora reports.
+            None => Lighting::default(),
+        };
+
+        if !self.battery_alert_is_showing() {
+            return slot_lighting;
+        }
+
+        battery_alert_lighting()
+    }
+
+    /// Whether the alert is taking the keyboard right now.
+    ///
+    /// A low battery is not enough on its own. With the backlight off
+    /// there is nothing lit to turn red, so the alert is not showing, and
+    /// reporting it as if it were would have clients draw a red keyboard
+    /// next to a dark one. Off stays off: that was a choice, and an unlit
+    /// keyboard cannot warn anyone anyway.
+    fn battery_alert_is_showing(&self) -> bool {
+        self.battery_alert_active && self.active_slot.index().is_some()
+    }
+
+    /// Read the battery and turn the alert on or off. Runs on the core
+    /// thread with every other state change, so the alert needs no channel
+    /// and no thread of its own.
+    fn read_battery_if_due(&mut self) {
+        let Some(battery_dir) = self.battery_dir.clone() else {
+            return;
+        };
+        if Instant::now() < self.battery_read_at {
+            return;
+        }
+        self.battery_read_at = Instant::now() + BATTERY_POLL_INTERVAL;
+
+        // A read that fails leaves the alert where it is and tries again
+        // next time: a battery that briefly cannot be read is not news.
+        let Some(reading) = battery::read(&battery_dir) else {
+            return;
+        };
+
+        let charge_moved = self.battery_percent != Some(reading.percent);
+        self.battery_percent = Some(reading.percent);
+
+        let alert_holds = battery_alert_holds(self.settings.battery_alert, reading);
+        if alert_holds == self.battery_alert_active {
+            // The alert has nothing new to say. The charge still might: a
+            // client drawing the Battery gauge reads it from state, so a
+            // percent that moved has to reach the client that draws it.
+            if charge_moved {
+                self.broadcast_state();
+            }
+            return;
+        }
+
+        self.battery_alert_active = alert_holds;
+        let reason = if alert_holds {
+            "battery low"
+        } else {
+            "battery recovered"
+        };
+        eprintln!("core: {reason} at {}%", reading.percent);
+        self.apply_active_slot(reason);
+    }
+
+    /// Turn the alert on or off. Off must give the keyboard back now rather
+    /// than at the next read, or the switch looks broken.
+    fn set_battery_alert(&mut self, enabled: bool) -> Response {
+        if self.settings.battery_alert == enabled {
+            return Response::Ok;
+        }
+
+        self.settings.battery_alert = enabled;
+        self.mark_changed();
+
+        if !enabled && self.battery_alert_active {
+            self.battery_alert_active = false;
+            self.apply_active_slot("battery alert turned off");
+            return Response::Ok;
+        }
+
+        // Turning it on must not wait out the poll interval either; the
+        // next tick reads and applies.
+        self.battery_read_at = Instant::now();
+        self.broadcast_state();
+        Response::Ok
     }
 
     /// One Fn+Space press. The slot advances immediately so clients see it,
@@ -403,7 +620,10 @@ impl Core {
         // which is exactly what leaves the keyboard dark. Inherit the
         // deadline instead of cancelling it.
         if self.slot_apply_at.is_some() {
-            eprintln!("core: client selected slot {}, applying after the pending transition", self.active_slot);
+            eprintln!(
+                "core: client selected slot {}, applying after the pending transition",
+                self.active_slot
+            );
             self.broadcast_state();
             return Response::Ok;
         }
@@ -472,7 +692,7 @@ impl Core {
             );
         };
 
-        if let Some(rejection) = validate_lighting(&lighting) {
+        if let Some(rejection) = validate_lighting(&lighting, self.battery_dir.is_some()) {
             return rejection;
         }
 
@@ -490,7 +710,7 @@ impl Core {
     }
 
     fn set_profile(&mut self, profile: Profile) -> Response {
-        if let Some(rejection) = validate_profile(&profile) {
+        if let Some(rejection) = validate_profile(&profile, self.battery_dir.is_some()) {
             return rejection;
         }
 
@@ -503,6 +723,12 @@ impl Core {
     fn play_custom_effect(&mut self, effect: CustomEffect) -> Response {
         if let Some(rejection) = validate_custom_effect(&effect) {
             return rejection;
+        }
+        if self.battery_alert_is_showing() {
+            return error_response(
+                ErrorKind::InvalidRequest,
+                "Turn off Low Battery Alert in Settings before playing a custom effect.",
+            );
         }
 
         let display_name = match &effect.name {
@@ -534,7 +760,10 @@ impl Core {
 
         match found {
             Some(effect) => self.play_custom_effect(effect),
-            None => error_response(ErrorKind::NoSuchCustomEffect, &format!("no saved custom effect called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchCustomEffect,
+                &format!("no saved custom effect called '{name}'"),
+            ),
         }
     }
 
@@ -545,12 +774,15 @@ impl Core {
 
     fn add_profile(&mut self, profile: Profile) -> Response {
         let Some(name) = profile.name.clone() else {
-            return error_response(ErrorKind::InvalidRequest, "profile needs a name to be saved");
+            return error_response(
+                ErrorKind::InvalidRequest,
+                "profile needs a name to be saved",
+            );
         };
         if let Some(rejection) = validate_name(&name, "profile") {
             return rejection;
         }
-        if let Some(rejection) = validate_profile(&profile) {
+        if let Some(rejection) = validate_profile(&profile, self.battery_dir.is_some()) {
             return rejection;
         }
 
@@ -579,7 +811,11 @@ impl Core {
     }
 
     fn delete_profile(&mut self, name: &str) -> Response {
-        let position = self.settings.profiles.iter().position(|saved| saved.name.as_deref() == Some(name));
+        let position = self
+            .settings
+            .profiles
+            .iter()
+            .position(|saved| saved.name.as_deref() == Some(name));
 
         match position {
             Some(index) => {
@@ -588,7 +824,10 @@ impl Core {
                 self.broadcast_state();
                 Response::Ok
             }
-            None => error_response(ErrorKind::NoSuchProfile, &format!("no saved profile called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchProfile,
+                &format!("no saved profile called '{name}'"),
+            ),
         }
     }
 
@@ -605,14 +844,20 @@ impl Core {
             // The active slot survives a profile switch: you keep looking at
             // the same position, with the new profile's lighting in it.
             Some(profile) => self.set_profile(profile),
-            None => error_response(ErrorKind::NoSuchProfile, &format!("no saved profile called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchProfile,
+                &format!("no saved profile called '{name}'"),
+            ),
         }
     }
 
     fn cycle_profile(&mut self) -> Response {
         let profile_count = self.settings.profiles.len();
         if profile_count == 0 {
-            return error_response(ErrorKind::NoSuchProfile, "no saved profiles to cycle through");
+            return error_response(
+                ErrorKind::NoSuchProfile,
+                "no saved profiles to cycle through",
+            );
         }
 
         let current_name = self.current_profile.name.clone();
@@ -637,7 +882,10 @@ impl Core {
 
     fn add_custom_effect(&mut self, effect: CustomEffect) -> Response {
         let Some(name) = effect.name.clone() else {
-            return error_response(ErrorKind::InvalidRequest, "custom effect needs a name to be saved");
+            return error_response(
+                ErrorKind::InvalidRequest,
+                "custom effect needs a name to be saved",
+            );
         };
         if let Some(rejection) = validate_name(&name, "custom effect") {
             return rejection;
@@ -671,7 +919,11 @@ impl Core {
     }
 
     fn delete_custom_effect(&mut self, name: &str) -> Response {
-        let position = self.settings.effects.iter().position(|saved| saved.name.as_deref() == Some(name));
+        let position = self
+            .settings
+            .effects
+            .iter()
+            .position(|saved| saved.name.as_deref() == Some(name));
 
         match position {
             Some(index) => {
@@ -680,7 +932,10 @@ impl Core {
                 self.broadcast_state();
                 Response::Ok
             }
-            None => error_response(ErrorKind::NoSuchCustomEffect, &format!("no saved custom effect called '{name}'")),
+            None => error_response(
+                ErrorKind::NoSuchCustomEffect,
+                &format!("no saved custom effect called '{name}'"),
+            ),
         }
     }
 
@@ -695,7 +950,8 @@ impl Core {
             profiles.push(ProfileSummary { name: name.clone() });
         }
 
-        let mut custom_effects: Vec<CustomEffectSummary> = Vec::with_capacity(self.settings.effects.len());
+        let mut custom_effects: Vec<CustomEffectSummary> =
+            Vec::with_capacity(self.settings.effects.len());
         for saved in &self.settings.effects {
             let Some(name) = &saved.name else {
                 continue;
@@ -719,6 +975,10 @@ impl Core {
             slot_sync: self.slot_sync.clone(),
             hotkey: self.hotkey.clone(),
             screen_capture: self.screen_capture.clone(),
+            battery_available: self.battery_dir.is_some(),
+            battery_alert: self.settings.battery_alert,
+            battery_alert_active: self.battery_alert_is_showing(),
+            battery_percent: self.battery_percent,
         }
     }
 
@@ -801,7 +1061,8 @@ impl Core {
 }
 
 /// Decide the slot to start from, given the persisted selection and a
-/// counter read taken before Aurora has written anything.
+/// counter read taken before Aurora has written anything. A reconnect keeps
+/// Aurora's live selection: a controller reset is not a user choosing off.
 ///
 /// The two sources know different things. The controller knows whether the
 /// user left the backlight off, which Aurora cannot know across a restart.
@@ -812,7 +1073,15 @@ impl Core {
 /// An unreadable or unsettled counter decides nothing, and the persisted
 /// selection stands. That matters on machines where the read never works:
 /// they keep their slot instead of being forced to the first one.
-fn anchor_slot(persisted: SlotSelection, counter_result: Result<u8, legion_rgb_driver::error::Error>) -> SlotSelection {
+fn anchor_slot(
+    persisted: SlotSelection,
+    counter_result: Result<u8, legion_rgb_driver::error::Error>,
+    reconnecting: bool,
+) -> SlotSelection {
+    if reconnecting {
+        return persisted;
+    }
+
     let counter = match counter_result {
         Ok(counter) => counter,
         Err(error) => {
@@ -822,7 +1091,9 @@ fn anchor_slot(persisted: SlotSelection, counter_result: Result<u8, legion_rgb_d
     };
 
     let Some(reported) = SlotSelection::from_counter(counter) else {
-        eprintln!("core: startup counter was mid-transition ({counter:#04x}); keeping slot {persisted}");
+        eprintln!(
+            "core: startup counter was mid-transition ({counter:#04x}); keeping slot {persisted}"
+        );
         return persisted;
     };
 
@@ -847,14 +1118,40 @@ fn anchor_slot(persisted: SlotSelection, counter_result: Result<u8, legion_rgb_d
     }
 }
 
+/// Whether the low-battery alert should be holding the keyboard.
+///
+/// Split out from the core so the rule is testable on its own, and stated
+/// once so the switch, the poll and the tests cannot drift apart. Being on
+/// AC clears the alert outright, so there is nothing for a hysteresis band
+/// to protect against and none is used.
+fn battery_alert_holds(enabled: bool, reading: battery::Reading) -> bool {
+    enabled && reading.discharging && reading.percent <= BATTERY_ALERT_PERCENT
+}
+
+/// Every zone red at the hardware's low brightness, held steady. Built
+/// fresh each time rather than stored: it is a constant dressed as a
+/// value, and nothing should be able to edit it.
+fn battery_alert_lighting() -> Lighting {
+    let mut lighting = Lighting::solid(BATTERY_ALERT_COLOR);
+    lighting.effect = Effects::Static;
+    lighting.brightness = Brightness::Low;
+    lighting
+}
+
 fn validate_name(name: &str, kind: &str) -> Option<Response> {
     if name.is_empty() {
-        return Some(error_response(ErrorKind::InvalidRequest, &format!("{kind} name is empty")));
+        return Some(error_response(
+            ErrorKind::InvalidRequest,
+            &format!("{kind} name is empty"),
+        ));
     }
     if name.len() > MAX_NAME_BYTES {
         return Some(error_response(
             ErrorKind::InvalidRequest,
-            &format!("{kind} name is {} bytes, the limit is {MAX_NAME_BYTES}", name.len()),
+            &format!(
+                "{kind} name is {} bytes, the limit is {MAX_NAME_BYTES}",
+                name.len()
+            ),
         ));
     }
 
@@ -863,21 +1160,27 @@ fn validate_name(name: &str, kind: &str) -> Option<Response> {
 
 fn validate_custom_effect(effect: &CustomEffect) -> Option<Response> {
     if effect.effect_steps.is_empty() {
-        return Some(error_response(ErrorKind::InvalidRequest, "custom effect has no steps"));
+        return Some(error_response(
+            ErrorKind::InvalidRequest,
+            "custom effect has no steps",
+        ));
     }
     if effect.effect_steps.len() > MAX_CUSTOM_EFFECT_STEPS {
         return Some(error_response(
             ErrorKind::InvalidRequest,
-            &format!("custom effect has {} steps, the limit is {MAX_CUSTOM_EFFECT_STEPS}", effect.effect_steps.len()),
+            &format!(
+                "custom effect has {} steps, the limit is {MAX_CUSTOM_EFFECT_STEPS}",
+                effect.effect_steps.len()
+            ),
         ));
     }
 
     None
 }
 
-fn validate_profile(profile: &Profile) -> Option<Response> {
+fn validate_profile(profile: &Profile, battery_available: bool) -> Option<Response> {
     for lighting in &profile.slots {
-        if let Some(rejection) = validate_lighting(lighting) {
+        if let Some(rejection) = validate_lighting(lighting, battery_available) {
             return Some(rejection);
         }
     }
@@ -885,21 +1188,49 @@ fn validate_profile(profile: &Profile) -> Option<Response> {
     None
 }
 
-/// Returns `Some(error response)` when the lighting is out of range.
-fn validate_lighting(lighting: &Lighting) -> Option<Response> {
-    if !SOFTWARE_SPEED_RANGE.contains(&lighting.speed) {
+/// Returns `Some(error response)` when the lighting is out of range, or asks
+/// for hardware this machine does not have.
+fn validate_lighting(lighting: &Lighting, battery_available: bool) -> Option<Response> {
+    // A profile file is portable and a battery is not, so a profile written
+    // on a laptop can reach a machine with nothing to gauge. Refusing it
+    // says so; running it would leave a keyboard lit at a charge that does
+    // not exist.
+    if lighting.effect.needs_a_battery() && !battery_available {
         return Some(error_response(
             ErrorKind::InvalidRequest,
-            &format!("speed {} outside {:?}", lighting.speed, SOFTWARE_SPEED_RANGE),
+            &format!(
+                "the {} effect needs a battery, and this machine has none",
+                lighting.effect
+            ),
         ));
     }
 
-    if let aurora_protocol::effects::Effects::AmbientLight { fps, saturation_boost } = lighting.effect {
+    if !SOFTWARE_SPEED_RANGE.contains(&lighting.speed) {
+        return Some(error_response(
+            ErrorKind::InvalidRequest,
+            &format!(
+                "speed {} outside {:?}",
+                lighting.speed, SOFTWARE_SPEED_RANGE
+            ),
+        ));
+    }
+
+    if let aurora_protocol::effects::Effects::AmbientLight {
+        fps,
+        saturation_boost,
+    } = lighting.effect
+    {
         if !(1..=60).contains(&fps) {
-            return Some(error_response(ErrorKind::InvalidRequest, &format!("ambient fps {fps} outside 1..=60")));
+            return Some(error_response(
+                ErrorKind::InvalidRequest,
+                &format!("ambient fps {fps} outside 1..=60"),
+            ));
         }
         if !(0.0..=1.0).contains(&saturation_boost) {
-            return Some(error_response(ErrorKind::InvalidRequest, "ambient saturation boost outside 0.0..=1.0"));
+            return Some(error_response(
+                ErrorKind::InvalidRequest,
+                "ambient saturation boost outside 0.0..=1.0",
+            ));
         }
     }
 
@@ -915,16 +1246,236 @@ fn error_response(kind: ErrorKind, message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use aurora_protocol::ipc::SlotSelection;
+    use aurora_protocol::ipc::{Response, SlotSelection};
     use legion_rgb_driver::error::{Error, RangeError, RangeErrorKind};
+    use strum::IntoEnumIterator;
 
-    use super::anchor_slot;
+    use super::{
+        anchor_slot, battery, battery_alert_holds, validate_lighting, validate_profile, Effects,
+        Lighting, Profile, BATTERY_ALERT_PERCENT,
+    };
+
+    fn connected_core() -> super::Core {
+        let (command_tx, _) = crossbeam_channel::bounded(crate::COMMAND_QUEUE_CAPACITY);
+        super::Core {
+            command_tx,
+            settings: crate::settings::Settings::default(),
+            current_profile: Profile::default(),
+            active_slot: SlotSelection::Second,
+            custom_effect_playing: None,
+            keyboard_status: aurora_protocol::ipc::KeyboardStatus::Connected,
+            keyboard_lost_at: None,
+            keyboard_device_name: Some("5-1.3".to_string()),
+            keyboard_releasing: false,
+            engine: None,
+            stop_signals: crate::engine::StopSignals::new(),
+            slot_apply_at: None,
+            slot_reader: None,
+            slot_trace_at: None,
+            subscribers: Vec::new(),
+            settings_dirty: false,
+            settings_error: None,
+            last_change_at: std::time::Instant::now(),
+            acquire_attempt_count: 0,
+            next_acquire_at: std::time::Instant::now(),
+            slot_sync: aurora_protocol::ipc::SubsystemState::Unknown,
+            hotkey: aurora_protocol::ipc::SubsystemState::Unknown,
+            screen_capture: aurora_protocol::ipc::SubsystemState::Inactive,
+            battery_dir: None,
+            battery_alert_active: false,
+            battery_percent: None,
+            battery_read_at: std::time::Instant::now(),
+            shutdown_requested: false,
+        }
+    }
+
+    #[test]
+    fn removing_an_idle_keyboard_starts_recovery_without_a_write() {
+        let mut core = connected_core();
+        core.handle_command(super::Command::KeyboardRemoved {
+            device_name: "5-1.3".to_string(),
+        });
+
+        assert_eq!(
+            core.keyboard_status,
+            aurora_protocol::ipc::KeyboardStatus::Searching
+        );
+        assert!(core.keyboard_device_name.is_none());
+        assert!(core.keyboard_lost_at.is_some());
+        assert_eq!(core.active_slot, SlotSelection::Second);
+        assert!(core.next_acquire_at <= std::time::Instant::now());
+    }
+
+    #[test]
+    fn removing_another_usb_device_does_not_interrupt_lighting() {
+        let mut core = connected_core();
+        core.handle_command(super::Command::KeyboardRemoved {
+            device_name: "5-1.2".to_string(),
+        });
+
+        assert_eq!(
+            core.keyboard_status,
+            aurora_protocol::ipc::KeyboardStatus::Connected
+        );
+        assert_eq!(core.keyboard_device_name.as_deref(), Some("5-1.3"));
+        assert!(core.keyboard_lost_at.is_none());
+    }
+
+    #[test]
+    fn dropped_usb_events_invalidate_the_idle_handle() {
+        let mut core = connected_core();
+        core.handle_command(super::Command::UsbEventsLost);
+
+        assert_eq!(
+            core.keyboard_status,
+            aurora_protocol::ipc::KeyboardStatus::Searching
+        );
+        assert!(core.keyboard_device_name.is_none());
+    }
+
+    #[test]
+    fn engine_release_completion_allows_reacquisition() {
+        let mut core = connected_core();
+        core.keyboard_releasing = true;
+        assert!(!core.keyboard_acquisition_is_due());
+        core.handle_command(super::Command::KeyboardReleased);
+        assert!(!core.keyboard_releasing);
+        assert!(core.keyboard_acquisition_is_due());
+    }
+
+    #[test]
+    fn a_reconnected_controller_keeps_the_selected_slot_even_if_firmware_is_off() {
+        assert_eq!(
+            anchor_slot(SlotSelection::Second, Ok(4), true),
+            SlotSelection::Second
+        );
+        assert_eq!(
+            anchor_slot(SlotSelection::Off, Ok(1), true),
+            SlotSelection::Off
+        );
+    }
+
+    #[test]
+    fn custom_playback_cannot_replace_an_active_battery_warning() {
+        use aurora_protocol::custom_effect::{CustomEffect, EffectStep, EffectType};
+
+        let mut core = connected_core();
+        core.battery_alert_active = true;
+        let effect = CustomEffect {
+            name: Some("Test".to_string()),
+            effect_steps: vec![EffectStep {
+                rgb_array: [0; 12],
+                step_type: EffectType::Set,
+                brightness: 1,
+                steps: 1,
+                delay_between_steps: 0,
+                sleep: 10,
+            }],
+            should_loop: false,
+        };
+        let response = core.play_custom_effect(effect);
+        assert!(matches!(response, Response::Error { .. }));
+        assert!(core.custom_effect_playing.is_none());
+        assert!(core.battery_alert_is_showing());
+    }
+
+    fn reading(percent: u8, discharging: bool) -> battery::Reading {
+        battery::Reading {
+            percent,
+            discharging,
+        }
+    }
+
+    #[test]
+    fn the_alert_holds_at_and_below_the_threshold_while_discharging() {
+        assert!(battery_alert_holds(
+            true,
+            reading(BATTERY_ALERT_PERCENT, true)
+        ));
+        assert!(battery_alert_holds(true, reading(1, true)));
+        assert!(battery_alert_holds(true, reading(0, true)));
+    }
+
+    #[test]
+    fn the_alert_lets_go_one_percent_above_the_threshold() {
+        assert!(!battery_alert_holds(
+            true,
+            reading(BATTERY_ALERT_PERCENT + 1, true)
+        ));
+    }
+
+    /// Conservation mode reports `Not charging` on AC, which reaches here
+    /// as `discharging: false`. Plugged in is plugged in, however flat.
+    #[test]
+    fn being_on_ac_clears_the_alert_at_any_charge() {
+        assert!(!battery_alert_holds(true, reading(1, false)));
+        assert!(!battery_alert_holds(true, reading(0, false)));
+    }
+
+    #[test]
+    fn the_switch_turns_the_alert_off_outright() {
+        assert!(!battery_alert_holds(false, reading(1, true)));
+    }
+
+    /// A profile file is portable and a battery is not, so this is the
+    /// path a laptop profile takes when it is opened on a desktop.
+    #[test]
+    fn the_battery_effect_is_refused_where_there_is_no_battery() {
+        let lighting = Lighting {
+            effect: Effects::Battery,
+            ..Default::default()
+        };
+
+        assert!(validate_lighting(&lighting, false).is_some());
+        assert!(validate_lighting(&lighting, true).is_none());
+    }
+
+    /// One slot is enough to refuse the whole profile: applying it would
+    /// start the gauge as soon as that slot came round.
+    #[test]
+    fn one_battery_slot_refuses_the_whole_profile() {
+        let mut profile = Profile::default();
+        profile.slots[2].effect = Effects::Battery;
+
+        assert!(validate_profile(&profile, false).is_some());
+        assert!(validate_profile(&profile, true).is_none());
+    }
+
+    /// The rejection must be about the battery and nothing else; every
+    /// other effect has to survive a machine without one.
+    #[test]
+    fn every_other_effect_survives_a_machine_without_a_battery() {
+        for effect in Effects::iter() {
+            if effect.needs_a_battery() {
+                continue;
+            }
+
+            // The iterator yields zeroed fields, and ambient's are checked
+            // separately; give it the defaults a client would send.
+            let effect = match effect {
+                Effects::AmbientLight { .. } => Effects::AmbientLight {
+                    fps: 30,
+                    saturation_boost: 0.0,
+                },
+                other => other,
+            };
+            let lighting = Lighting {
+                effect,
+                ..Default::default()
+            };
+
+            assert!(
+                validate_lighting(&lighting, false).is_none(),
+                "{effect} was refused on a machine with no battery"
+            );
+        }
+    }
 
     #[test]
     fn off_on_the_counter_wins_over_any_stored_slot() {
         // The user pressed Fn+Space to off while the daemon was down. Only
         // the controller knows that.
-        let anchored = anchor_slot(SlotSelection::Second, Ok(4));
+        let anchored = anchor_slot(SlotSelection::Second, Ok(4), false);
         assert_eq!(anchored, SlotSelection::Off);
     }
 
@@ -932,13 +1483,13 @@ mod tests {
     fn a_lit_counter_keeps_the_stored_slot() {
         // The counter says lit but its number is unreliable, because
         // Aurora's own writes moved it last session. The stored slot wins.
-        let anchored = anchor_slot(SlotSelection::Third, Ok(1));
+        let anchored = anchor_slot(SlotSelection::Third, Ok(1), false);
         assert_eq!(anchored, SlotSelection::Third);
     }
 
     #[test]
     fn a_lit_counter_recovers_from_a_stored_off() {
-        let anchored = anchor_slot(SlotSelection::Off, Ok(2));
+        let anchored = anchor_slot(SlotSelection::Off, Ok(2), false);
         assert_eq!(anchored, SlotSelection::First);
     }
 
@@ -946,15 +1497,23 @@ mod tests {
     /// onto slot 1, overwriting whatever the user last chose.
     #[test]
     fn an_unreadable_counter_keeps_the_stored_slot() {
-        let read_error = Error::RangeError(RangeError { kind: RangeErrorKind::Slot });
-        let anchored = anchor_slot(SlotSelection::Third, Err(read_error));
+        let read_error = Error::RangeError(RangeError {
+            kind: RangeErrorKind::Slot,
+        });
+        let anchored = anchor_slot(SlotSelection::Third, Err(read_error), false);
         assert_eq!(anchored, SlotSelection::Third);
     }
 
     #[test]
     fn a_mid_transition_counter_keeps_the_stored_slot() {
         // Observed live: 0 persisted for over 20 seconds on a 2023 Pro.
-        assert_eq!(anchor_slot(SlotSelection::Second, Ok(0)), SlotSelection::Second);
-        assert_eq!(anchor_slot(SlotSelection::Off, Ok(9)), SlotSelection::Off);
+        assert_eq!(
+            anchor_slot(SlotSelection::Second, Ok(0), false),
+            SlotSelection::Second
+        );
+        assert_eq!(
+            anchor_slot(SlotSelection::Off, Ok(9), false),
+            SlotSelection::Off
+        );
     }
 }

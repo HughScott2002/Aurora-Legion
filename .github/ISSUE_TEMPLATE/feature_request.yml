@@ -1,28 +1,41 @@
 name: Feature Request
-description: Template for submitting a request for a new feature or enhancement.
+description: Something Aurora should be able to do and cannot.
 labels:
-  - feature request
+  - enhancement
 body:
   - type: textarea
+    id: description
     attributes:
-      label: Feature Description
-      description: Provide a clear and concise description of the feature you would like to see implemented.
+      label: What you want
+      description: >-
+        What Aurora should do, and what you are trying to get done with it.
+        The second half matters more than the first: it is what decides
+        whether there is a simpler way to get you there.
     validations:
       required: true
+
   - type: textarea
+    id: proposed_solution
     attributes:
-      label: Proposed Solution
-      description: If you have a specific solution in mind, please describe it in detail.
+      label: How you would do it
+      description: If you have a shape in mind, describe it.
+    validations:
+      required: false
+
   - type: textarea
+    id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: Have you considered any alternative solutions or workarounds? Please describe them.
-  - type: input
-    attributes:
-      label: Use Case
-      description: Describe the use case for this feature.
-      placeholder: e.g., "As a user, I want to be able to..."
+      label: What you tried instead
+      description: >-
+        Workarounds, other tools, or the way you do it today. A workaround
+        that almost works usually says where the real gap is.
+    validations:
+      required: false
+
   - type: textarea
+    id: other_details
     attributes:
-      label: Additional Context
-      description: Include any other relevant information you would like to share.
+      label: Anything else
+      description: Mockups, links, or prior art from other tools.
+    validations:
+      required: false

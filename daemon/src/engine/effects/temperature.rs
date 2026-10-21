@@ -7,8 +7,12 @@ use crate::engine::Inner;
 pub fn play(manager: &mut Inner) {
     let safe_temp = 20.0;
     let ramp_boost = 1.6;
-    let temp_cool: [f32; 12] = [0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0];
-    let temp_hot: [f32; 12] = [255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0];
+    let temp_cool: [f32; 12] = [
+        0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0,
+    ];
+    let temp_hot: [f32; 12] = [
+        255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0, 255.0, 0.0, 0.0,
+    ];
 
     let mut color_differences: [f32; 12] = [0.0; 12];
     for index in 0..12 {
@@ -22,7 +26,11 @@ pub fn play(manager: &mut Inner) {
 
     for component in components.iter_mut() {
         if component.label().contains("Tctl") {
-            while !manager.stop_signals.manager_stop_signal.load(Ordering::SeqCst) {
+            while !manager
+                .stop_signals
+                .manager_stop_signal
+                .load(Ordering::SeqCst)
+            {
                 component.refresh();
                 let temp = component.temperature();
                 if let Some(temperature) = temp {
@@ -34,7 +42,8 @@ pub fn play(manager: &mut Inner) {
 
                     let mut target = [0.0; 12];
                     for index in 0..12 {
-                        target[index] = color_differences[index].mul_add(temp_percent, temp_cool[index]);
+                        target[index] =
+                            color_differences[index].mul_add(temp_percent, temp_cool[index]);
                     }
 
                     let mut target_bytes: [u8; 12] = [0; 12];

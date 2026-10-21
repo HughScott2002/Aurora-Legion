@@ -11,6 +11,10 @@ use std::{
 
 pub mod error;
 
+/// Lenovo's USB vendor ID. Every controller the driver knows is one of
+/// theirs, so a scan of the bus starts here and narrows by product.
+pub const VENDOR_ID: u16 = 0x048d;
+
 const KNOWN_DEVICE_INFOS: [(u16, u16, u16, u16); 11] = [
     (0x048d, 0xc995, 0xff89, 0x00cc), // 2024 Pro
     (0x048d, 0xc994, 0xff89, 0x00cc), // 2024
@@ -91,10 +95,16 @@ pub struct LightingState {
 impl LightingState {
     fn build_payload(&self) -> Result<[u8; FEATURE_REPORT_BYTES]> {
         if !SPEED_RANGE.contains(&self.speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Speed,
+            }
+            .into());
         }
         if !BRIGHTNESS_RANGE.contains(&self.brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Brightness,
+            }
+            .into());
         }
 
         let mut payload: [u8; FEATURE_REPORT_BYTES] = [0; FEATURE_REPORT_BYTES];
@@ -125,12 +135,24 @@ impl LightingState {
         Ok(payload)
     }
 
-    fn replace_profile(&mut self, effect: BaseEffects, speed: u8, brightness: u8, rgb_values: [u8; 12]) -> Result<()> {
+    fn replace_profile(
+        &mut self,
+        effect: BaseEffects,
+        speed: u8,
+        brightness: u8,
+        rgb_values: [u8; 12],
+    ) -> Result<()> {
         if !SPEED_RANGE.contains(&speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Speed,
+            }
+            .into());
         }
         if !BRIGHTNESS_RANGE.contains(&brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Brightness,
+            }
+            .into());
         }
 
         self.effect_type = effect;
@@ -162,7 +184,10 @@ fn lock_hid_device(device: &SharedHidDevice) -> MutexGuard<'_, HidDevice> {
 /// session shows exactly what Aurora sent and when. This is the only
 /// evidence that separates "Aurora never wrote" from "Aurora wrote and the
 /// controller overwrote it afterwards".
-fn trace_feature_report(payload: &[u8; FEATURE_REPORT_BYTES], send_result: &std::result::Result<(), hidapi::HidError>) {
+fn trace_feature_report(
+    payload: &[u8; FEATURE_REPORT_BYTES],
+    send_result: &std::result::Result<(), hidapi::HidError>,
+) {
     let is_failure = send_result.is_err();
     let Some(suppressed_count) = claim_trace_slot(is_failure) else {
         return;
@@ -225,12 +250,22 @@ fn claim_trace_slot(is_failure: bool) -> Option<u64> {
 
 pub struct Keyboard {
     keyboard_hid: SharedHidDevice,
+    device_path: std::ffi::CString,
     current_state: LightingState,
     stop_signal: Arc<AtomicBool>,
 }
 
 #[allow(dead_code)]
 impl Keyboard {
+    /// The libusb path is the kernel USB port name followed by
+    /// `:configuration.interface`. Keep the identity of the device actually
+    /// opened, so removals of unrelated devices cannot interrupt lighting.
+    pub fn usb_device_name(&self) -> Option<&str> {
+        let path = self.device_path.to_str().ok()?;
+        let (device_name, _) = path.split_once(':')?;
+        Some(device_name)
+    }
+
     pub fn refresh(&mut self) -> Result<()> {
         let payload = self.current_state.build_payload()?;
 
@@ -259,7 +294,8 @@ impl Keyboard {
         brightness: u8,
         rgb_values: [u8; 12],
     ) -> Result<()> {
-        self.current_state.replace_profile(effect, speed, brightness, rgb_values)?;
+        self.current_state
+            .replace_profile(effect, speed, brightness, rgb_values)?;
         self.refresh()
     }
 
@@ -280,7 +316,10 @@ impl Keyboard {
 
     pub fn set_speed(&mut self, speed: u8) -> Result<()> {
         if !SPEED_RANGE.contains(&speed) {
-            return Err(RangeError { kind: RangeErrorKind::Speed }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Speed,
+            }
+            .into());
         }
 
         self.current_state.speed = speed;
@@ -291,9 +330,15 @@ impl Keyboard {
 
     pub fn set_brightness(&mut self, brightness: u8) -> Result<()> {
         if !BRIGHTNESS_RANGE.contains(&brightness) {
-            return Err(RangeError { kind: RangeErrorKind::Brightness }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Brightness,
+            }
+            .into());
         }
-        let brightness = brightness.clamp(BRIGHTNESS_RANGE.min().unwrap(), BRIGHTNESS_RANGE.max().unwrap());
+        let brightness = brightness.clamp(
+            BRIGHTNESS_RANGE.min().unwrap(),
+            BRIGHTNESS_RANGE.max().unwrap(),
+        );
         self.current_state.brightness = brightness;
         self.refresh()?;
 
@@ -302,7 +347,10 @@ impl Keyboard {
 
     pub fn set_zone_by_index(&mut self, zone_index: u8, new_values: [u8; 3]) -> Result<()> {
         if !ZONE_RANGE.contains(&zone_index) {
-            return Err(RangeError { kind: RangeErrorKind::Zone }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Zone,
+            }
+            .into());
         }
 
         for (i, _) in new_values.iter().enumerate() {
@@ -338,12 +386,19 @@ impl Keyboard {
         Ok(())
     }
 
-    pub fn transition_colors_to(&mut self, target_colors: &[u8; 12], steps: u8, delay_between_steps: u64) -> Result<()> {
+    pub fn transition_colors_to(
+        &mut self,
+        target_colors: &[u8; 12],
+        steps: u8,
+        delay_between_steps: u64,
+    ) -> Result<()> {
         if let BaseEffects::Static | BaseEffects::Breath = self.current_state.effect_type {
             let mut new_values = self.current_state.rgb_values.map(f32::from);
             let mut color_differences: [f32; 12] = [0.0; 12];
             for index in 0..12 {
-                color_differences[index] = (f32::from(target_colors[index]) - f32::from(self.current_state.rgb_values[index])) / f32::from(steps);
+                color_differences[index] = (f32::from(target_colors[index])
+                    - f32::from(self.current_state.rgb_values[index]))
+                    / f32::from(steps);
             }
             if !self.stop_signal.load(Ordering::SeqCst) {
                 for _step_num in 1..=steps {
@@ -380,7 +435,9 @@ fn find_known_device(api: &HidApi) -> Result<&hidapi::DeviceInfo> {
             {
                 let info_tuple = (d.vendor_id(), d.product_id());
 
-                KNOWN_DEVICE_INFOS.iter().any(|known| (known.0, known.1) == info_tuple)
+                KNOWN_DEVICE_INFOS
+                    .iter()
+                    .any(|known| (known.0, known.1) == info_tuple)
             }
         })
         .ok_or(error::Error::DeviceNotFound)
@@ -410,7 +467,10 @@ impl SlotReader {
             device.get_feature_report(&mut report)?
         };
         if read_count < 2 {
-            return Err(RangeError { kind: RangeErrorKind::Slot }.into());
+            return Err(RangeError {
+                kind: RangeErrorKind::Slot,
+            }
+            .into());
         }
 
         Ok(report[1])
@@ -432,6 +492,7 @@ pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
 
     let keyboard = Keyboard {
         keyboard_hid,
+        device_path: info.path().to_owned(),
         current_state,
         stop_signal,
     };
@@ -439,22 +500,97 @@ pub fn get_keyboard(stop_signal: Arc<AtomicBool>) -> Result<Keyboard> {
     Ok(keyboard)
 }
 
-pub fn find_possible_keyboards() -> Result<Vec<String>> {
+/// True where this product ID is a controller the driver knows how to
+/// program. Linux matches on vendor and product alone; the usage page and
+/// usage in [`KNOWN_DEVICE_INFOS`] are a Windows-only distinction, so this
+/// answers the Linux question.
+pub fn is_supported_product_id(product_id: u16) -> bool {
+    for known in KNOWN_DEVICE_INFOS {
+        if known.1 == product_id {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// One device sitting on the bus under [`VENDOR_ID`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VendorDevice {
+    pub product_id: u16,
+    pub supported: bool,
+}
+
+/// Every device this machine exposes under Lenovo's vendor ID, whether the
+/// driver can program it or not.
+///
+/// The unsupported ones are the point. A Legion puts its plain HID keyboard
+/// interface behind the same vendor ID as its lighting controller, so
+/// "something of Lenovo's is here but it is not the controller" and "nothing
+/// is here at all" are different answers, and only a scan tells them apart.
+pub fn scan_vendor_devices() -> Result<Vec<VendorDevice>> {
     let api: HidApi = HidApi::new()?;
 
-    let mut list = api
-        .device_list()
-        .filter(|d| d.vendor_id() == 0x048d)
-        .map(|d| format!("{:#06x}:{:#06x}", d.vendor_id(), d.product_id()))
-        .collect::<Vec<String>>();
+    let mut devices: Vec<VendorDevice> = Vec::new();
+    for info in api.device_list() {
+        if info.vendor_id() != VENDOR_ID {
+            continue;
+        }
 
-    list.dedup();
-    Ok(list)
+        // One device shows up once per interface, and the interfaces are
+        // not what a reader of this list cares about.
+        let mut already_listed = false;
+        for listed in &devices {
+            if listed.product_id == info.product_id() {
+                already_listed = true;
+                break;
+            }
+        }
+        if already_listed {
+            continue;
+        }
+
+        devices.push(VendorDevice {
+            product_id: info.product_id(),
+            supported: is_supported_product_id(info.product_id()),
+        });
+    }
+
+    Ok(devices)
+}
+
+/// Opens the controller, then closes it, reporting only whether it opened.
+/// Writes nothing.
+///
+/// A machine with no controller and a machine whose controller Aurora may
+/// not open look identical from the outside: the keyboard stays dark. They
+/// need opposite fixes, so a diagnostic has to try the open and say which
+/// one it hit.
+pub fn can_open_keyboard() -> Result<()> {
+    let api: HidApi = HidApi::new()?;
+    let info = find_known_device(&api)?;
+    let _device = info.open_device(&api)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_known_product_id_is_recognised() {
+        for known in KNOWN_DEVICE_INFOS {
+            assert!(is_supported_product_id(known.1), "{:#06x}", known.1);
+        }
+    }
+
+    #[test]
+    fn the_plain_keyboard_interface_is_not_a_controller() {
+        // 048d:c103 is the HID keyboard a Legion exposes beside its
+        // lighting controller. Same vendor, not the device Aurora drives.
+        assert!(!is_supported_product_id(0xc103));
+    }
 
     #[test]
     fn complete_profile_replaces_every_payload_field() {
@@ -473,6 +609,9 @@ mod tests {
             Ok(payload) => payload,
             Err(error) => panic!("complete profile should build: {error}"),
         };
-        assert_eq!(&payload[..17], &[0xcc, 0x16, 0x03, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(
+            &payload[..17],
+            &[0xcc, 0x16, 0x03, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        );
     }
 }

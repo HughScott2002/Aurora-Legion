@@ -1,7 +1,19 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
-#[derive(Clone, Copy, EnumString, Serialize, Deserialize, Display, EnumIter, Debug, IntoStaticStr, Default, PartialEq)]
+#[derive(
+    Clone,
+    Copy,
+    EnumString,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumIter,
+    Debug,
+    IntoStaticStr,
+    Default,
+    PartialEq,
+)]
 pub enum Effects {
     #[default]
     Static,
@@ -26,6 +38,10 @@ pub enum Effects {
     Fade,
     Temperature,
     Ripple,
+    /// The keyboard as a charge gauge: the slot's own colors, dimmed zone
+    /// by zone from the right as the battery drains. Offered only on
+    /// machines that have a battery to gauge.
+    Battery,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, EnumIter, EnumString, PartialEq)]
@@ -50,33 +66,88 @@ impl Effects {
     }
 
     pub fn takes_color_array(self) -> bool {
-        matches!(self, Self::Static | Self::Breath | Self::Lightning | Self::Swipe { .. } | Self::Fade | Self::Ripple)
+        matches!(
+            self,
+            Self::Static
+                | Self::Breath
+                | Self::Lightning
+                | Self::Swipe { .. }
+                | Self::Fade
+                | Self::Ripple
+                | Self::Battery
+        )
+    }
+
+    /// True for effects that only work where the hardware backs them, so a
+    /// client can leave them out of a picker rather than offer a choice the
+    /// daemon will refuse.
+    pub fn needs_a_battery(self) -> bool {
+        matches!(self, Self::Battery)
     }
 
     pub fn takes_direction(self) -> bool {
-        matches!(self, Self::Wave | Self::SmoothWave { .. } | Self::Swipe { .. })
+        matches!(
+            self,
+            Self::Wave | Self::SmoothWave { .. } | Self::Swipe { .. }
+        )
     }
 
     pub fn takes_speed(self) -> bool {
         matches!(
             self,
-            Self::Breath | Self::Smooth | Self::Wave | Self::Lightning | Self::SmoothWave { .. } | Self::Swipe { .. } | Self::Disco | Self::Fade | Self::Ripple
+            Self::Breath
+                | Self::Smooth
+                | Self::Wave
+                | Self::Lightning
+                | Self::SmoothWave { .. }
+                | Self::Swipe { .. }
+                | Self::Disco
+                | Self::Fade
+                | Self::Ripple
         )
     }
 
     pub fn is_built_in(self) -> bool {
-        matches!(self, Self::Static | Self::Breath | Self::Smooth | Self::Wave)
+        matches!(
+            self,
+            Self::Static | Self::Breath | Self::Smooth | Self::Wave
+        )
     }
 }
 
-#[derive(Clone, Copy, EnumString, Serialize, Deserialize, Debug, EnumIter, IntoStaticStr, PartialEq, Eq, Default)]
+#[derive(
+    Clone,
+    Copy,
+    EnumString,
+    Serialize,
+    Deserialize,
+    Debug,
+    EnumIter,
+    IntoStaticStr,
+    PartialEq,
+    Eq,
+    Default,
+)]
 pub enum Direction {
     #[default]
     Left,
     Right,
 }
 
-#[derive(PartialEq, Eq, EnumIter, IntoStaticStr, Clone, Copy, Default, Serialize, Deserialize, Debug, Display, EnumString)]
+#[derive(
+    PartialEq,
+    Eq,
+    EnumIter,
+    IntoStaticStr,
+    Clone,
+    Copy,
+    Default,
+    Serialize,
+    Deserialize,
+    Debug,
+    Display,
+    EnumString,
+)]
 pub enum Brightness {
     #[default]
     Low,

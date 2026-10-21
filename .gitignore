@@ -16,8 +16,13 @@ dist
 
 # Other
 things.md
-*.json
 .history
+
+# The daemon falls back to ./settings.json in its working directory, so
+# running it from a clone drops one here. Ignore that file rather than
+# every JSON in the tree: profiles and custom effects are JSON too, and
+# exported ones are meant to be committable as examples.
+/settings.json
 
 # Agent tooling state
 .a5c

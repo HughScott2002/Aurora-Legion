@@ -1,4 +1,5 @@
 pub mod ambient;
+pub mod battery_gauge;
 pub mod christmas;
 pub mod disco;
 pub mod fade;

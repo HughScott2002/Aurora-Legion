@@ -24,7 +24,7 @@ pipeline:
   tables below report pass 2, the settled figure. Both passes are shown
   so the gap is visible rather than hidden.
 - The upstream app and the Aurora daemon were never running at the same
-  time. They contend for the same hidraw device.
+  time. They contend for the same USB controller.
 
 ## Results
 
@@ -137,10 +137,9 @@ that connects and disconnects against a daemon nothing else is touching.
 - The resident process, which is what runs whenever your lights are on,
   is 11.5 MiB against 92.5 MiB. The resident part carries no GUI
   toolkit, renderer or tray stack.
-- Idle CPU was 0.05% against 0.13%. The 100 ms hotkey poll from
-  `device_query` has since been removed and the daemon now measures
-  below the sampler's resolution; see the section above for what that
-  does and does not establish.
+- Idle CPU was 0.05% against 0.13%. The August experiment without the
+  hotkey poll measured below the sampler's resolution. The hotkey has
+  since been restored, so that result does not describe this release.
 - Swipe CPU is the same within noise, 0.50% against 0.52%. It is the
   same HID transition code, inherited from upstream.
 - The GTK4 GUI uses about 85 MiB while open, slightly less than
