@@ -1,6 +1,0 @@
-# Captures are build output, not source. If WORK is pointed inside the
-# repo, keep the whole run directory out of the tree.
-out/
-home/
-runtime/
-*.log
